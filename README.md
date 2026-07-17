@@ -5,7 +5,7 @@ links) por Telegram y el sistema la convierte en contenido profesional por marca
 publicado en tus redes.
 
 - **Diseño:** [`docs/superpowers/specs/2026-07-17-personal-brand-os-v1-design.md`](docs/superpowers/specs/2026-07-17-personal-brand-os-v1-design.md)
-- **Estado:** Plan B2 (captura por Telegram) — ver `docs/superpowers/plans/`
+- **Estado:** Plan C2 (conversación por Telegram) — ver `docs/superpowers/plans/`
 
 ## Levantar en la Mac mini
 
@@ -43,10 +43,26 @@ La Mac mini no expone ningún puerto a Internet: el puente sale a buscar los men
 
 ### Probar
 
-1. `/start` al bot → responde la ayuda.
-2. Mandar una nota de voz → `📎 Evidencia E-0001 guardada. 🎙️ Escuché: «...»`.
-3. Mandar una foto con caption → descripción de visión + entidades detectadas.
-4. Desde otro Telegram (no autorizado) → silencio absoluto.
+1. `/start` → el bot responde la ayuda.
+2. Mandar texto, foto o audio → archiva como evidencia (E-XXXX) + propone una idea con botones
+   (✍️ Desarrollar, 💡 Otra idea, 🗑️ Descartar).
+3. Tocar **✍️ Desarrollar** → el bot genera un boceto con la voz de la marca. Responder con texto
+   (feedback) → el bot refina el boceto. Tocar **✅ Aprobar** → elegir cuándo publicar:
+   - 🚀 Ahora
+   - 🌅 Mañana 9hs (usa `TZ_OFFSET_MINUTES` de `.env` para tu zona horaria)
+   - ⏳ A la cola (para programar luego)
+4. `/cola` → muestra los posts pendientes de programar.
+5. `/idea <texto>` → crea una idea manualmente sin capturar evidencia.
+6. Mensaje desde un Telegram no autorizado (distinto de `ADMIN_CHAT_ID`) → silencio absoluto.
+
+**IMPORTANTE (primera vez):**
+- Abrir [http://localhost:5678](http://localhost:5678) (n8n)
+- Workflows → Import from file → `n8n/workflow.json` → activarlo (toggle **Active**)
+- Verificar que el nodo "Switch camino" muestre exactamente **3 salidas** sin errores de validación:
+  1. `evidencia` (foto/audio/video)
+  2. `turno` (texto/botón/comando)
+  3. `ayuda` (fallback)
+- Si el import falla, regenerar con `node n8n/build-workflow.mjs` y re-importar.
 
 ## Desarrollo local
 
