@@ -28,7 +28,7 @@ export async function downloadFile(fileId, { token, fetchImpl = fetch }) {
 }
 
 export async function forwardUpdate(update, deps) {
-  const { webhook, fetchImpl = fetch } = deps
+  const { token, webhook, fetchImpl = fetch } = deps
   const mapped = mapUpdate(update)
   if (!mapped) return { forwarded: false, reason: 'sin_mapeo' }
   const payload = { ...mapped }
@@ -36,6 +36,16 @@ export async function forwardUpdate(update, deps) {
     const buffer = await downloadFile(mapped.fileId, deps)
     payload.content_base64 = buffer.toString('base64')
     delete payload.fileId
+  }
+  if (mapped.callbackQueryId) {
+    try {
+      await fetchImpl(`${api(token)}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: mapped.callbackQueryId }),
+      })
+    } catch {}
+    delete payload.callbackQueryId
   }
   const res = await fetchImpl(webhook, {
     method: 'POST',
@@ -56,6 +66,16 @@ export async function runOnce(offset, deps) {
       await forwardUpdate(u, deps)
     } catch (err) {
       log.error(`puente: update ${u.update_id} falló: ${err}`)
+      const mapped = mapUpdate(u)
+      if (mapped) {
+        try {
+          await deps.fetchImpl(`${api(deps.token)}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: mapped.chatId, text: '⚠️ No pude procesar ese mensaje. Probá de nuevo en un rato.' }),
+          })
+        } catch {}
+      }
     }
   }
   return next

@@ -1,4 +1,8 @@
 export function mapUpdate(update) {
+  const cbq = update.callback_query
+  if (cbq && cbq.message && cbq.message.chat) {
+    return { chatId: String(cbq.message.chat.id), tipo: 'boton', boton: cbq.data, callbackQueryId: cbq.id }
+  }
   const msg = update.message
   if (!msg || !msg.chat) return null
   const chatId = String(msg.chat.id)
