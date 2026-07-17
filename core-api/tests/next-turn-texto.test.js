@@ -53,4 +53,14 @@ describe('texto en inicio = captura', () => {
     expect(res.texto).toMatch(/guardada/i)
     expect(db.prepare("SELECT COUNT(*) n FROM evidence WHERE text_content='captura resiliente'").get().n).toBe(1)
   })
+
+  it('si el INSERT falla avisa que NO se guardó', async () => {
+    const { db, user } = setup()
+    db.exec('DROP TABLE evidence')
+    const res = await nextTurn(db, user, '111', { clase: 'texto', texto: 'texto perdido' }, { fetchImpl: llm([]) })
+    expect(res.texto).toMatch(/No pude guardar/)
+    expect(res.estado).toBe('inicio')
+    expect(res.texto).not.toMatch(/guardada/)
+    expect(res.botones).toEqual([])
+  })
 })

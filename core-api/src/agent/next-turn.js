@@ -207,24 +207,35 @@ async function handleTexto(db, user, chatId, input, opts) {
 
 // texto en 'inicio' (o sin sesión) = captura de evidencia, igual que clase 'evidencia'
 async function handleTextoCaptura(db, user, chatId, input, opts) {
-  const info = db.prepare(`
-    INSERT INTO evidence (user_id, type, text_content) VALUES (?, 'texto', ?)
-  `).run(user.id, input.texto)
-  const id = info.lastInsertRowid
-  const result = await processEvidence(db, id, { fetchImpl: opts?.fetchImpl })
-  const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(id)
-  const entities = entitiesFor(db, id)
-  const evidencia = {
-    id,
-    folio: `E-${String(id).padStart(4, '0')}`,
-    processed: result.processed,
-    detalle: {
-      transcription: fila.transcription,
-      vision_description: fila.vision_description,
-      entities,
-    },
+  let evidenceId
+  try {
+    const info = db.prepare(`
+      INSERT INTO evidence (user_id, type, text_content) VALUES (?, 'texto', ?)
+    `).run(user.id, input.texto)
+    evidenceId = info.lastInsertRowid
+  } catch (err) {
+    console.error('captura texto falló:', err)
+    return { texto: '⚠️ No pude guardar tu texto. Mandámelo de nuevo en un momento.', botones: [], estado: 'inicio' }
   }
-  return handleEvidencia(db, user, chatId, evidencia, opts)
+
+  try {
+    const result = await processEvidence(db, evidenceId, { fetchImpl: opts?.fetchImpl })
+    const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(evidenceId)
+    const entities = entitiesFor(db, evidenceId)
+    const evidencia = {
+      id: evidenceId,
+      folio: `E-${String(evidenceId).padStart(4, '0')}`,
+      processed: result.processed,
+      detalle: {
+        transcription: fila.transcription,
+        vision_description: fila.vision_description,
+        entities,
+      },
+    }
+    return handleEvidencia(db, user, chatId, evidencia, opts)
+  } catch (err) {
+    throw err
+  }
 }
 
 // ---------------------------------------------------------------------------
