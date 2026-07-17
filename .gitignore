@@ -4,4 +4,6 @@ node_modules/
 *.db-wal
 *.db-shm
 /data/
+/backups/
+*.tar.gz.enc
 .superpowers/

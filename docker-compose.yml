@@ -40,4 +40,6 @@ services:
 
 volumes:
   pbos_data:
+    name: pbos_data # nombre fijo: scripts/backup.sh y restore.sh lo referencian literal,
+                     # sin depender del nombre de proyecto de compose.
   n8n_data:
