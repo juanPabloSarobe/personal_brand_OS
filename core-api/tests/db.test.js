@@ -35,10 +35,23 @@ describe('openDb', () => {
   })
 
   it('da de alta al admin desde el entorno, una sola vez', () => {
-    const db = freshDb()
+    const dir = mkdtempSync(path.join(tmpdir(), 'pbos-db-'))
+    const dbPath = path.join(dir, 'test.db')
+
+    // First open
+    let db = openDb({ dbPath })
+    db.close()
+
+    // Second open on the same path
+    db = openDb({ dbPath })
+
     const admin = db.prepare('SELECT * FROM users WHERE telegram_chat_id = ?').get('111')
     expect(admin.name).toBe('Juan Pablo')
     expect(admin.is_admin).toBe(1)
     expect(admin.status).toBe('activo')
+
+    // Verify idempotency: only one admin with this chat_id
+    const count = db.prepare('SELECT COUNT(*) AS n FROM users WHERE telegram_chat_id = ?').get('111')
+    expect(count.n).toBe(1)
   })
 })
