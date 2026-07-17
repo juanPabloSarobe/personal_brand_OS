@@ -5,11 +5,13 @@ import { openDb } from '../src/db.js'
 import { createApp } from '../src/app.js'
 
 export const ADMIN_CHAT = '111'
+export const INTERNAL_SECRET = 'test-internal-secret-9f3a7c2e'
 
 export function makeTestApp() {
   process.env.MASTER_KEY = 'ab'.repeat(32)
   process.env.ADMIN_CHAT_ID = ADMIN_CHAT
   process.env.ADMIN_NAME = 'Juan Pablo'
+  process.env.INTERNAL_API_SECRET = INTERNAL_SECRET
   delete process.env.GROQ_API_KEY
   const dir = mkdtempSync(path.join(tmpdir(), 'pbos-'))
   process.env.MEDIA_DIR = path.join(dir, 'media')

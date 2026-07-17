@@ -7,13 +7,18 @@ import { invitationsRouter } from './routes/invitations.js'
 
 export function createApp(db, { aiFetch } = {}) {
   const app = express()
-  app.use(express.json({ limit: '50mb' })) // evidencia entra como base64
   app.get('/health', (_req, res) => res.json({ ok: true }))
 
   if (db) {
     // ÚNICA ruta pública del sistema (sin authMiddleware) — montada ANTES del router
     // autenticado para que la petición nunca llegue a authMiddleware. Ver invitations.js.
-    app.use('/api/invitations', invitationsRouter(db))
+    // Body parser propio y chico (10kb, sobra para {code, chatId, nombre}): esta ruta no
+    // tiene autenticación, así que el límite de 50mb pensado para evidencia (más abajo)
+    // sería una superficie de amplificación de DoS gratuita acá. El matching de Express
+    // es por path, así que esto pisa el límite global solo para /api/invitations.
+    app.use('/api/invitations', express.json({ limit: '10kb' }), invitationsRouter(db))
+
+    app.use(express.json({ limit: '50mb' })) // evidencia entra como base64
 
     const api = express.Router()
     api.use(authMiddleware(db))

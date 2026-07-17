@@ -16,6 +16,7 @@ services:
     environment:
       - CORE_API_URL=http://core-api:3000
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_SECURE_COOKIE=false
       - N8N_PAYLOAD_SIZE_MAX=48

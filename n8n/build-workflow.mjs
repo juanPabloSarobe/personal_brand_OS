@@ -115,7 +115,9 @@ const httpCoreApi = (name, { url, jsonBody }, position) => ({
 // es la sola ruta pública del sistema, el remitente todavía no existe en `users` así
 // que no hay chat_id que autenticar. Mismos flags de resiliencia que httpCoreApi
 // (fullResponse, neverError, onError continue) pero timeout corto: es una consulta
-// local a SQLite, no un pipeline de IA.
+// local a SQLite, no un pipeline de IA. Lleva X-Internal-Secret: al no haber chat_id
+// que autenticar, es la única forma de probar que quien llama es este pipeline de n8n
+// y no un vecino en la red de docker-compose falsificando un chatId ajeno.
 const httpRedimirInvitacion = (name, position) => ({
   name,
   type: 'n8n-nodes-base.httpRequest',
@@ -128,6 +130,7 @@ const httpRedimirInvitacion = (name, position) => ({
     sendHeaders: true,
     headerParameters: { parameters: [
       { name: 'Content-Type', value: 'application/json' },
+      { name: 'X-Internal-Secret', value: '={{ $env.INTERNAL_API_SECRET }}' },
     ] },
     sendBody: true,
     specifyBody: 'json',

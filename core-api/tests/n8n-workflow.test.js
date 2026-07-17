@@ -85,6 +85,14 @@ describe('workflow de n8n', () => {
       JSON.stringify(redimirInvitacion.parameters.headerParameters),
       'Redimir invitacion NO debe mandar X-Telegram-Chat-Id — es la ruta pública sin auth'
     ).not.toContain('X-Telegram-Chat-Id')
+    // SEGURIDAD: sin chat_id que autenticar, el secreto interno compartido con core-api
+    // es la única prueba de que quien llama es este pipeline de n8n (cierra el hallazgo
+    // de secuestro de cuenta por chatId falsificado en /redeem).
+    const headerSecreto = redimirInvitacion.parameters.headerParameters.parameters.find(
+      (p) => p.name === 'X-Internal-Secret'
+    )
+    expect(headerSecreto, 'Redimir invitacion debe mandar X-Internal-Secret').toBeTruthy()
+    expect(headerSecreto.value).toBe('={{ $env.INTERNAL_API_SECRET }}')
     expect(redimirInvitacion.parameters.jsonBody).toBe(
       '={{ JSON.stringify({code: $json.code, chatId: $json.chatId, nombre: $json.nombre}) }}'
     )
