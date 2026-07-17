@@ -63,7 +63,15 @@ export function pendingFor(db, userId) {
     WHERE i.created_by = ? AND v.status = 'programada'
     ORDER BY v.scheduled_at
   `).all(userId)
-  return { ideas, drafts, programadas }
+  const aprobados = db.prepare(`
+    SELECT d.id, p.name AS profile, i.title FROM drafts d
+    JOIN brand_profiles p ON p.id = d.profile_id
+    JOIN ideas i ON i.id = d.idea_id
+    WHERE i.created_by = ? AND d.status = 'aprobado'
+      AND NOT EXISTS (SELECT 1 FROM channel_versions v WHERE v.draft_id = d.id)
+    ORDER BY d.id DESC
+  `).all(userId)
+  return { ideas, drafts, programadas, aprobados }
 }
 
 export function connectedChannels(db, profileId) {

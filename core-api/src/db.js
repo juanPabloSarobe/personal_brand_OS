@@ -20,6 +20,8 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
     if (existsSync(seedPath)) db.exec(readFileSync(seedPath, 'utf8'))
   }
 
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_draft_channel ON channel_versions(draft_id, profile_channel_id)")
+
   ensureAdmin(db)
   return db
 }
