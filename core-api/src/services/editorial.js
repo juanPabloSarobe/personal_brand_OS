@@ -74,6 +74,25 @@ export function pendingFor(db, userId) {
   return { ideas, drafts, programadas, aprobados }
 }
 
+// Crea un perfil de marca con su owner y el canal wa_status auto-conectado
+// (paquete manual, sin credenciales — spec §6/§10). Helper compartido entre
+// la ruta REST (POST /api/profiles) y el comando conversacional /marca.
+export function crearPerfilConWaStatus(db, { name, slug, identity = {}, ownerId }) {
+  const info = db.prepare(
+    'INSERT INTO brand_profiles (name, slug, identity_json) VALUES (?, ?, ?)'
+  ).run(name, slug, JSON.stringify(identity))
+  const profileId = info.lastInsertRowid
+  db.prepare(
+    "INSERT INTO user_profile_access (user_id, profile_id, role) VALUES (?, ?, 'owner')"
+  ).run(ownerId, profileId)
+  const waChannel = db.prepare("SELECT id FROM channels WHERE code = 'wa_status'").get()
+  db.prepare(`
+    INSERT INTO profile_channels (profile_id, channel_id, status, credentials_enc)
+    VALUES (?, ?, 'conectado', NULL)
+  `).run(profileId, waChannel.id)
+  return profileId
+}
+
 export function connectedChannels(db, profileId) {
   return db.prepare(`
     SELECT pc.id, c.code FROM profile_channels pc

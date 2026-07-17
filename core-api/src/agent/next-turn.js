@@ -4,6 +4,7 @@ import { getSession, setSession, clearSession } from '../services/sessions.js'
 import {
   createIdea, setIdeaStatus, linkIdeaProfiles, createDraft, updateDraft,
   setDraftStatus, createChannelVersion, pendingFor, connectedChannels,
+  crearPerfilConWaStatus,
 } from '../services/editorial.js'
 import { proponerIdea, redactarBoceto, refinarBoceto, adaptarVersion } from '../services/redactor.js'
 import { renderChannelImage, FORMAT_DIMENSIONS } from '../services/imagen.js'
@@ -112,6 +113,14 @@ function sinPermisoEditar(profile) {
   return { texto: `🔒 No tenés permiso para editar bocetos en ${profile.name}.`, botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
 }
 
+function slugify(name) {
+  return name
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // saca acentos
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 function textoGuia(session) {
   return {
     texto: 'Mandame una foto, un audio o un texto para capturar una idea. Escribí /cola para ver qué tenés pendiente.',
@@ -182,7 +191,30 @@ async function handleComando(db, user, chatId, input) {
       estado: 'proponiendo_idea',
     }
   }
+  if (comando === '/marca' || comando.startsWith('/marca ')) {
+    return handleMarcaNueva(db, user, chatId, comando)
+  }
   return textoGuia(getSession(db, user.id, chatId))
+}
+
+// /marca <nombre>: solo admin. Crea el perfil + owner + wa_status auto-conectado
+// (mismo helper que usa la ruta REST — nunca duplicar el INSERT).
+function handleMarcaNueva(db, user, chatId, comando) {
+  if (!user.is_admin) {
+    setSession(db, user.id, chatId, 'inicio', {})
+    return { texto: '🔒 Solo el administrador puede crear marcas nuevas.', botones: [], estado: 'inicio' }
+  }
+  const nombre = comando.slice('/marca'.length).trim()
+  if (!nombre) {
+    return { texto: 'Decime el nombre de la marca, ej. /marca SkyTrace', botones: [], estado: 'inicio' }
+  }
+  crearPerfilConWaStatus(db, { name: nombre, slug: slugify(nombre), identity: {}, ownerId: user.id })
+  setSession(db, user.id, chatId, 'inicio', {})
+  return {
+    texto: `✅ Marca "${nombre}" creada. WhatsApp Status ya está listo para paquetes manuales. Usá /conectar para sumar LinkedIn o Instagram.`,
+    botones: [],
+    estado: 'inicio',
+  }
 }
 
 // ---------------------------------------------------------------------------

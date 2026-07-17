@@ -3,6 +3,7 @@ import { makeTestApp } from './helpers.js'
 import {
   createIdea, setIdeaStatus, linkIdeaProfiles, createDraft, updateDraft,
   setDraftStatus, createChannelVersion, pendingFor, connectedChannels,
+  crearPerfilConWaStatus,
 } from '../src/services/editorial.js'
 
 function setup() {
@@ -61,5 +62,30 @@ describe('editorial', () => {
     db.prepare("INSERT INTO profile_channels (profile_id, channel_id, status) VALUES (?, ?, 'desconectado')").run(profileId, wa)
     const codes = connectedChannels(db, profileId).map((c) => c.code)
     expect(codes).toEqual(['linkedin'])
+  })
+
+  it('crearPerfilConWaStatus crea el perfil, el owner y auto-conecta wa_status', () => {
+    const { db, userId } = setup()
+    const profileId = crearPerfilConWaStatus(db, {
+      name: 'SkyTrace', slug: 'skytrace', identity: { tono: 'primera persona' }, ownerId: userId,
+    })
+    const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+    expect(profile.name).toBe('SkyTrace')
+    expect(profile.slug).toBe('skytrace')
+    expect(JSON.parse(profile.identity_json)).toEqual({ tono: 'primera persona' })
+
+    const access = db.prepare(
+      'SELECT role FROM user_profile_access WHERE user_id = ? AND profile_id = ?'
+    ).get(userId, profileId)
+    expect(access.role).toBe('owner')
+
+    const pc = db.prepare(`
+      SELECT pc.status, pc.credentials_enc, c.code
+      FROM profile_channels pc JOIN channels c ON c.id = pc.channel_id
+      WHERE pc.profile_id = ?
+    `).get(profileId)
+    expect(pc.code).toBe('wa_status')
+    expect(pc.status).toBe('conectado')
+    expect(pc.credentials_enc).toBeNull()
   })
 })

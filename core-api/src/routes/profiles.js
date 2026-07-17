@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { can } from '../permissions.js'
 import { encryptJson } from '../crypto.js'
+import { crearPerfilConWaStatus } from '../services/editorial.js'
 
 const EDITABLE = ['name', 'identity_json', 'cadence_json', 'format_strategy_json', 'ai_overrides_json', 'visual_template']
 
@@ -22,13 +23,8 @@ export function profilesRouter(db) {
     if (!req.user.is_admin) return res.status(403).json({ error: 'solo el administrador crea perfiles' })
     const { name, slug, identity = {} } = req.body
     if (!name || !slug) return res.status(400).json({ error: 'name y slug son requeridos' })
-    const info = db.prepare(
-      'INSERT INTO brand_profiles (name, slug, identity_json) VALUES (?, ?, ?)'
-    ).run(name, slug, JSON.stringify(identity))
-    db.prepare(
-      "INSERT INTO user_profile_access (user_id, profile_id, role) VALUES (?, ?, 'owner')"
-    ).run(req.user.id, info.lastInsertRowid)
-    res.status(201).json({ id: info.lastInsertRowid })
+    const profileId = crearPerfilConWaStatus(db, { name, slug, identity, ownerId: req.user.id })
+    res.status(201).json({ id: profileId })
   })
 
   r.get('/:id', (req, res) => {
