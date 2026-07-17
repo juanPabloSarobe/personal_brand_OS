@@ -15,6 +15,13 @@ docker compose up -d --build
 curl http://localhost:3000/health   # → {"ok":true}
 ```
 
+### IA (opcional pero recomendado)
+
+Con `GROQ_API_KEY` configurada (gratis en [console.groq.com](https://console.groq.com)),
+cada evidencia se procesa al entrar: los audios se transcriben (Whisper), las fotos se
+describen (visión) y se detectan entidades (personas, empresas, tecnologías, lugares).
+Sin la key, la captura funciona igual — solo no se procesa.
+
 ## Desarrollo local
 
 ```bash
