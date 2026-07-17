@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { mkdirSync } from 'node:fs'
+import crypto from 'node:crypto'
 import { getSession, setSession, clearSession } from '../services/sessions.js'
 import {
   createIdea, setIdeaStatus, linkIdeaProfiles, createDraft, updateDraft,
@@ -28,6 +29,10 @@ const BOTONES_PROG = [
   { id: 'prog_maniana', label: '🌅 Mañana 9hs' },
   { id: 'prog_cola', label: '⏳ A la cola' },
 ]
+
+// Alfabeto seguro para códigos de invitación: sin 0/O/1/I (se confunden al dictar/leer).
+const ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const ROLES_VALIDOS = ['owner', 'editor', 'approver']
 
 // Formato propuesto por canal cuando la idea tiene una foto de evidencia disponible.
 const FORMATO_CON_IMAGEN = { linkedin: 'imagen', instagram: 'feed', wa_status: 'historia' }
@@ -194,6 +199,9 @@ async function handleComando(db, user, chatId, input) {
   if (comando === '/marca' || comando.startsWith('/marca ')) {
     return handleMarcaNueva(db, user, chatId, comando)
   }
+  if (comando === '/invitar' || comando.startsWith('/invitar ')) {
+    return handleInvitar(db, user, chatId, comando)
+  }
   return textoGuia(getSession(db, user.id, chatId))
 }
 
@@ -215,6 +223,52 @@ function handleMarcaNueva(db, user, chatId, comando) {
     botones: [],
     estado: 'inicio',
   }
+}
+
+// perfiles donde el usuario tiene permiso para la acción dada (ej. 'invitar' → solo owner)
+function perfilesConPermiso(db, userId, action) {
+  return perfilesDe(db, userId).filter((p) => can(db, userId, p.id, action))
+}
+
+function generarCodigoInvitacion() {
+  const bytes = crypto.randomBytes(8)
+  let code = ''
+  for (let i = 0; i < 8; i++) code += ALFABETO_CODIGO[bytes[i] % ALFABETO_CODIGO.length]
+  return code
+}
+
+function generarInvitacion(db, user, chatId, profile, rol) {
+  const code = generarCodigoInvitacion()
+  db.prepare(`
+    INSERT INTO invitations (code, profile_id, role, created_by, expires_at)
+    VALUES (?, ?, ?, ?, datetime('now', '+48 hours'))
+  `).run(code, profile.id, rol, user.id)
+  setSession(db, user.id, chatId, 'inicio', {})
+  return {
+    texto: `🎟️ Código para sumar a ${profile.name} como ${rol}: ${code}\n\nQue te escriban a este bot: /unirme ${code}\n(vence en 48 horas)`,
+    botones: [],
+    estado: 'inicio',
+  }
+}
+
+// /invitar [rol]: solo owner del perfil. Genera un código de invitación de 8 chars,
+// válido por 48h. Si el usuario es owner de varios perfiles, primero pregunta cuál.
+function handleInvitar(db, user, chatId, comando) {
+  const arg = comando.slice('/invitar'.length).trim()
+  const rol = arg || 'editor'
+  if (!ROLES_VALIDOS.includes(rol)) {
+    return { texto: `Rol inválido. Elegí owner, editor o approver (ej. /invitar approver).`, botones: [], estado: 'inicio' }
+  }
+  const perfiles = perfilesConPermiso(db, user.id, 'invitar')
+  if (perfiles.length === 0) {
+    return { texto: '🔒 No sos owner de ninguna marca.', botones: [], estado: 'inicio' }
+  }
+  if (perfiles.length === 1) {
+    return generarInvitacion(db, user, chatId, perfiles[0], rol)
+  }
+  setSession(db, user.id, chatId, 'eligiendo_perfil_invitacion', { comando: 'invitar', rol })
+  const botones = perfiles.map((p) => ({ id: `perfil_${p.id}`, label: `👤 ${p.name}` }))
+  return { texto: '¿Para qué marca es la invitación?', botones, estado: 'eligiendo_perfil_invitacion' }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +331,9 @@ async function handleBoton(db, user, chatId, input, opts) {
   if (boton === 'idea_desarrollar') return handleIdeaDesarrollar(db, user, chatId, session, opts)
   if (boton === 'idea_guardar') return handleIdeaGuardar(db, user, chatId, session)
   if (boton === 'idea_descartar') return handleIdeaDescartar(db, user, chatId, session)
+  if (boton.startsWith('perfil_') && session.state === 'eligiendo_perfil_invitacion') {
+    return handlePerfilInvitacion(db, user, chatId, session, boton)
+  }
   if (boton.startsWith('perfil_')) return handlePerfilElegido(db, user, chatId, session, boton, opts)
   if (boton === 'boceto_aprobar') return handleBocetoAprobar(db, user, chatId, session, opts)
   if (boton === 'boceto_otra') return handleBocetoOtra(db, user, chatId, session, opts)
@@ -341,6 +398,17 @@ async function handlePerfilElegido(db, user, chatId, session, boton, opts) {
   setIdeaStatus(db, idea.id, 'en_conversacion')
   const [primero, ...resto] = elegidos
   return await redactarParaPerfil(db, user, chatId, idea, primero, resto.map((p) => p.id), opts)
+}
+
+// segundo turno de /invitar cuando el owner tiene varios perfiles: el botón perfil_<id>
+// elegido completa la generación del código con el rol guardado en sesión.
+function handlePerfilInvitacion(db, user, chatId, session, boton) {
+  const rol = session.data?.rol || 'editor'
+  const pid = Number(boton.slice('perfil_'.length))
+  const perfiles = perfilesConPermiso(db, user.id, 'invitar')
+  const profile = perfiles.find((p) => p.id === pid)
+  if (!profile) return textoGuia(session)
+  return generarInvitacion(db, user, chatId, profile, rol)
 }
 
 async function redactarParaPerfil(db, user, chatId, idea, profile, queueIds, opts) {
