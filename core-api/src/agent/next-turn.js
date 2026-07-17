@@ -8,6 +8,7 @@ import {
 import { proponerIdea, redactarBoceto, refinarBoceto, adaptarVersion } from '../services/redactor.js'
 import { renderChannelImage, FORMAT_DIMENSIONS } from '../services/imagen.js'
 import { AiError } from '../ai/client.js'
+import { can } from '../permissions.js'
 
 const BOTONES_IDEA = [
   { id: 'idea_desarrollar', label: '✍️ Desarrollar' },
@@ -96,6 +97,10 @@ function presentarBoceto(profile, content) {
   return `📝 *${profile.name}*\n\n${content}`
 }
 
+function sinPermisoEditar(profile) {
+  return { texto: `🔒 No tenés permiso para editar bocetos en ${profile.name}.`, botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+}
+
 function textoGuia(session) {
   return {
     texto: 'Mandame una foto, un audio o un texto para capturar una idea. Escribí /cola para ver qué tenés pendiente.',
@@ -174,6 +179,7 @@ async function handleTexto(db, user, chatId, input, opts) {
   if (session.state === 'refinando_boceto' && session.data?.draftId) {
     const { ideaId, profileId, draftId, queue = [] } = session.data
     const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+    if (!can(db, user.id, profileId, 'editar_boceto')) return sinPermisoEditar(profile)
     const draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(draftId)
     const { content, raw } = await refinarBoceto(profile, draft.content, input.texto, opts)
     updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
@@ -261,6 +267,16 @@ async function handlePerfilElegido(db, user, chatId, session, boton, opts) {
 }
 
 async function redactarParaPerfil(db, user, chatId, idea, profile, queueIds, opts) {
+  if (!can(db, user.id, profile.id, 'editar_boceto')) {
+    // sin permiso para este perfil: seguimos con el próximo en cola, si hay
+    if (queueIds.length > 0) {
+      const [nextId, ...resto] = queueIds
+      const nextProfile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(nextId)
+      return await redactarParaPerfil(db, user, chatId, idea, nextProfile, resto, opts)
+    }
+    setSession(db, user.id, chatId, 'inicio', {})
+    return { texto: `🔒 No tenés permiso para editar bocetos en ${profile.name}.`, botones: [], estado: 'inicio' }
+  }
   const evidencias = evidenciasDeIdea(db, idea.id)
   const { content, raw } = await redactarBoceto(profile, idea, evidencias, opts)
   const draftId = createDraft(db, { ideaId: idea.id, profileId: profile.id, content, rawLlm: raw ? JSON.stringify(raw) : null })
@@ -269,16 +285,22 @@ async function redactarParaPerfil(db, user, chatId, idea, profile, queueIds, opt
 }
 
 async function handleBocetoAprobar(db, user, chatId, session, opts) {
-  const { ideaId, draftId, queue = [] } = session.data || {}
+  const { ideaId, profileId, draftId, queue = [] } = session.data || {}
   if (!draftId) return textoGuia(session)
+  const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+  if (!can(db, user.id, profileId, 'aprobar')) {
+    return { texto: `🔒 Necesitás rol approver para aprobar en ${profile.name}.`, botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+  }
   setDraftStatus(db, draftId, 'aprobado')
   const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
   return await avanzarCola(db, user, chatId, idea, queue, opts)
 }
 
 async function handleBocetoDescartar(db, user, chatId, session, opts) {
-  const { ideaId, draftId, queue = [] } = session.data || {}
+  const { ideaId, profileId, draftId, queue = [] } = session.data || {}
   if (!draftId) return textoGuia(session)
+  const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+  if (!can(db, user.id, profileId, 'editar_boceto')) return sinPermisoEditar(profile)
   setDraftStatus(db, draftId, 'descartado')
   const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
   return await avanzarCola(db, user, chatId, idea, queue, opts)
@@ -289,6 +311,7 @@ async function handleBocetoOtra(db, user, chatId, session, opts) {
   if (!draftId) return textoGuia(session)
   const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
   const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+  if (!can(db, user.id, profileId, 'editar_boceto')) return sinPermisoEditar(profile)
   const evidencias = evidenciasDeIdea(db, idea.id)
   const { content, raw } = await redactarBoceto(profile, idea, evidencias, opts)
   updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
@@ -322,7 +345,29 @@ async function handleProgramar(db, user, chatId, session, boton, opts) {
   const idea = ideaId ? db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId) : null
   if (!idea) return textoGuia(session)
 
-  const drafts = db.prepare("SELECT * FROM drafts WHERE idea_id = ? AND status = 'aprobado'").all(idea.id)
+  const aprobados = db.prepare("SELECT * FROM drafts WHERE idea_id = ? AND status = 'aprobado'").all(idea.id)
+
+  // matriz de permisos: solo se programan los drafts cuyo perfil autoriza 'programar'
+  const drafts = []
+  const sinPermisoPerfiles = []
+  for (const draft of aprobados) {
+    if (can(db, user.id, draft.profile_id, 'programar')) {
+      drafts.push(draft)
+    } else {
+      const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(draft.profile_id)
+      sinPermisoPerfiles.push(profile.name)
+    }
+  }
+
+  if (drafts.length === 0 && sinPermisoPerfiles.length > 0) {
+    // nadie de los perfiles aprobados puede ser programado por este usuario: estado se mantiene
+    return {
+      texto: `🔒 Necesitás rol approver para programar en: ${sinPermisoPerfiles.join(', ')}.`,
+      botones: BOTONES_PROG,
+      estado: 'programando',
+    }
+  }
+
   const foto = fotoDeIdea(db, idea.id)
   const resumen = []
 
@@ -332,6 +377,16 @@ async function handleProgramar(db, user, chatId, session, boton, opts) {
     for (const canal of canales) {
       const formatCode = foto ? FORMATO_CON_IMAGEN[canal.code] : FORMATO_SOLO_TEXTO[canal.code]
       if (!formatCode) continue // sin formato viable para este canal en este escenario
+
+      // idempotencia: si ya existe una versión para este draft+canal (reintento tras
+      // una falla a mitad de camino), la reusamos en vez de duplicarla.
+      const existente = db.prepare(
+        'SELECT id FROM channel_versions WHERE draft_id = ? AND profile_channel_id = ?'
+      ).get(draft.id, canal.id)
+      if (existente) {
+        resumen.push(`• ${profile.name} → ${canal.code}/${formatCode} (ya estaba programado)`)
+        continue
+      }
 
       const adapt = await adaptarVersion(profile, draft.content, canal.code, formatCode, opts)
 
@@ -362,8 +417,9 @@ async function handleProgramar(db, user, chatId, session, boton, opts) {
 
   setIdeaStatus(db, idea.id, 'lista')
   setSession(db, user.id, chatId, 'inicio', {})
+  const notaSinPermiso = sinPermisoPerfiles.length ? `\n\n🔒 Sin permiso para programar en: ${sinPermisoPerfiles.join(', ')}.` : ''
   const texto = resumen.length
-    ? `Listo, quedó así:\n${resumen.join('\n')}`
+    ? `Listo, quedó así:\n${resumen.join('\n')}${notaSinPermiso}`
     : 'No había canales conectados para publicar esto todavía.'
   return { texto, botones: [], estado: 'inicio' }
 }

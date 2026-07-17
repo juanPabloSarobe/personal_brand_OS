@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { makeTestApp } from './helpers.js'
 import { nextTurn } from '../src/agent/next-turn.js'
+import { getSession, setSession } from '../src/services/sessions.js'
 
 const llmRouter = (respuestas) => {
   let i = 0
@@ -112,5 +113,56 @@ describe('next-turn', () => {
     const res = await nextTurn(db, user, '111', { clase: 'comando', comando: '/cola' }, {})
     expect(res.texto).toBeTruthy()
     expect(res.estado).toBe('inicio')
+  })
+
+  it('editor no puede aprobar (matriz de permisos)', async () => {
+    const { db, user, ids, evidencia } = setup()
+    db.prepare('UPDATE user_profile_access SET role = ? WHERE user_id = ? AND profile_id = ?')
+      .run('editor', user.id, ids[0])
+    await nextTurn(db, user, '111', { clase: 'evidencia', evidencia }, {
+      fetchImpl: llmRouter(['{"titulo": "T", "resumen": null}']),
+    })
+    const desarrollar = await nextTurn(db, user, '111', { clase: 'boton', boton: 'idea_desarrollar' }, {
+      fetchImpl: llmRouter(['borrador']),
+    })
+    expect(desarrollar.estado).toBe('refinando_boceto') // editor puede redactar/refinar
+
+    const res = await nextTurn(db, user, '111', { clase: 'boton', boton: 'boceto_aprobar' }, { fetchImpl: llmRouter([]) })
+    expect(res.texto).toMatch(/approver/)
+    expect(res.estado).toBe('refinando_boceto')
+
+    const draft = db.prepare('SELECT * FROM drafts').get()
+    expect(draft.status).toBe('en_refinamiento')
+  })
+
+  it('reintento de programación no duplica versiones', async () => {
+    const { db, user, evidencia } = setup()
+    const fetchImpl = llmRouter((body) => {
+      const s = JSON.stringify(body.messages)
+      if (s.includes('proponer') || s.includes('evidencia capturada') || s.includes('Evidencia')) {
+        if (body.response_format) {
+          if (s.includes('Adaptá') || s.includes('adaptado')) return '{"texto": "adaptado", "hashtags": "#a"}'
+          return '{"titulo": "T", "resumen": null}'
+        }
+      }
+      if (body.response_format) return '{"texto": "adaptado", "hashtags": "#a"}'
+      return 'borrador'
+    })
+    await nextTurn(db, user, '111', { clase: 'evidencia', evidencia }, { fetchImpl })
+    await nextTurn(db, user, '111', { clase: 'boton', boton: 'idea_desarrollar' }, { fetchImpl })
+    const prog = await nextTurn(db, user, '111', { clase: 'boton', boton: 'boceto_aprobar' }, { fetchImpl })
+    expect(prog.estado).toBe('programando')
+    const sesionProgramando = getSession(db, user.id, '111')
+
+    await nextTurn(db, user, '111', { clase: 'boton', boton: 'prog_cola' }, { fetchImpl })
+    const countAfterFirst = db.prepare('SELECT COUNT(*) n FROM channel_versions').get().n
+    expect(countAfterFirst).toBeGreaterThan(0)
+
+    // Simulamos un reintento tras una falla a mitad de camino: la sesión vuelve a
+    // 'programando' con los mismos datos y el usuario presiona la misma opción otra vez.
+    setSession(db, user.id, '111', 'programando', sesionProgramando.data)
+    await nextTurn(db, user, '111', { clase: 'boton', boton: 'prog_cola' }, { fetchImpl })
+    const countAfterSecond = db.prepare('SELECT COUNT(*) n FROM channel_versions').get().n
+    expect(countAfterSecond).toBe(countAfterFirst)
   })
 })
