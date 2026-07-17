@@ -44,7 +44,14 @@ export function profilesRouter(db) {
     const sets = []
     const vals = []
     for (const field of EDITABLE) {
-      if (field in req.body) { sets.push(`${field} = ?`); vals.push(req.body[field]) }
+      if (field in req.body) {
+        let value = req.body[field]
+        if (field.endsWith('_json') && value !== null && typeof value === 'object') {
+          value = JSON.stringify(value)
+        }
+        sets.push(`${field} = ?`)
+        vals.push(value)
+      }
     }
     if (!sets.length) return res.status(400).json({ error: 'nada para actualizar' })
     vals.push(id)

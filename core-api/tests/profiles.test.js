@@ -54,4 +54,35 @@ describe('perfiles de marca', () => {
       .send({ identity_json: JSON.stringify({ tono: 'nosotros' }) })
     expect(asOwner.status).toBe(200)
   })
+
+  it('PUT acepta objetos en campos _json (los serializa)', async () => {
+    const { app } = makeTestApp()
+    const created = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'TestProfile', slug: 'testprofile' })
+    const profileId = created.body.id
+
+    const putRes = await request(app).put(`/api/profiles/${profileId}`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ identity_json: { tono: 'nosotros' } })
+    expect(putRes.status).toBe(200)
+
+    const getRes = await request(app).get(`/api/profiles/${profileId}`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+    expect(JSON.parse(getRes.body.identity_json)).toEqual({ tono: 'nosotros' })
+  })
+
+  it('errores internos no exponen stack', async () => {
+    const { app } = makeTestApp()
+    const created = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'TestProfile', slug: 'testprofile' })
+    const profileId = created.body.id
+
+    const putRes = await request(app).put(`/api/profiles/${profileId}`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: { unexpected: 'object' } })
+    expect(putRes.status).toBe(500)
+    expect(putRes.body).toEqual({ error: 'error interno' })
+  })
 })
