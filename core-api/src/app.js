@@ -1,6 +1,7 @@
 import express from 'express'
 import { authMiddleware } from './auth.js'
 import { profilesRouter } from './routes/profiles.js'
+import { evidenceRouter } from './routes/evidence.js'
 
 export function createApp(db) {
   const app = express()
@@ -15,6 +16,7 @@ export function createApp(db) {
       res.json({ id, name, is_admin })
     })
     api.use('/profiles', profilesRouter(db))
+    api.use('/evidence', evidenceRouter(db))
     app.use('/api', api)
     app.locals.api = api // los routers de rutas se montan acá en tasks siguientes
   }
