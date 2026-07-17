@@ -34,7 +34,9 @@ export async function sendMessage(chatId, text, options = {}) {
     }
 
     const data = await response.json()
-    return { ok: data.ok !== false }
+    return data.ok !== false
+      ? { ok: true }
+      : { ok: false, reason: data.description || 'telegram respondio ok:false' }
   } catch (err) {
     return { ok: false, reason: `Error: ${err.message}` }
   }
@@ -83,7 +85,9 @@ export async function sendPhotoFile(chatId, filePath, caption, options = {}) {
     }
 
     const data = await response.json()
-    return { ok: data.ok !== false }
+    return data.ok !== false
+      ? { ok: true }
+      : { ok: false, reason: data.description || 'telegram respondio ok:false' }
   } catch (err) {
     return { ok: false, reason: `Error: ${err.message}` }
   }

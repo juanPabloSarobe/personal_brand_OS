@@ -20,15 +20,19 @@ function buildCtx({
 }
 
 const ORIGINAL_BASE_URL = process.env.MEDIA_PUBLIC_BASE_URL
+const ORIGINAL_MEDIA_DIR = process.env.MEDIA_DIR
 
 describe('publicador instagram', () => {
   beforeEach(() => {
     delete process.env.MEDIA_PUBLIC_BASE_URL
+    delete process.env.MEDIA_DIR
   })
 
   afterEach(() => {
     if (ORIGINAL_BASE_URL === undefined) delete process.env.MEDIA_PUBLIC_BASE_URL
     else process.env.MEDIA_PUBLIC_BASE_URL = ORIGINAL_BASE_URL
+    if (ORIGINAL_MEDIA_DIR === undefined) delete process.env.MEDIA_DIR
+    else process.env.MEDIA_DIR = ORIGINAL_MEDIA_DIR
   })
 
   it('sin credenciales → degrade sin llamar fetch', async () => {
@@ -116,6 +120,46 @@ describe('publicador instagram', () => {
     expect(llamadas[2].url).toContain('access_token=secret-tok-ig-123')
 
     expect(resultado).toEqual({ ok: true, url: 'https://www.instagram.com/p/ABC123/' })
+  })
+
+  it('media_path bajo MEDIA_DIR/versions/ → image_url conserva la subcarpeta versions/', async () => {
+    process.env.MEDIA_PUBLIC_BASE_URL = 'https://media.example.com/data/media'
+    process.env.MEDIA_DIR = '/data/media'
+    const ctx = buildCtx({ mediaPath: '/data/media/versions/v1_linkedin_imagen.jpg' })
+    const llamadas = []
+
+    const fetchImpl = async (url, opts) => {
+      llamadas.push({ url, opts })
+      if (llamadas.length === 1) return { ok: true, status: 200, json: async () => ({ id: 'creation-id-1' }) }
+      if (llamadas.length === 2) return { ok: true, status: 200, json: async () => ({ id: 'media-id-1' }) }
+      return { ok: true, status: 200, json: async () => ({ permalink: 'https://www.instagram.com/p/V1/' }) }
+    }
+
+    await publicarInstagram(ctx, { fetchImpl })
+
+    const mediaParams = new URLSearchParams(llamadas[0].opts.body)
+    expect(mediaParams.get('image_url')).toBe('https://media.example.com/data/media/versions/v1_linkedin_imagen.jpg')
+    expect(mediaParams.get('image_url')).not.toBe('https://media.example.com/data/media/v1_linkedin_imagen.jpg')
+  })
+
+  it('media_path fuera de MEDIA_DIR → cae de vuelta a basename sin romper', async () => {
+    process.env.MEDIA_PUBLIC_BASE_URL = 'https://media.example.com/data/media'
+    process.env.MEDIA_DIR = '/data/media'
+    const ctx = buildCtx({ mediaPath: '/otra/ruta/no-relacionada/foto.jpg' })
+    const llamadas = []
+
+    const fetchImpl = async (url, opts) => {
+      llamadas.push({ url, opts })
+      if (llamadas.length === 1) return { ok: true, status: 200, json: async () => ({ id: 'creation-id-1' }) }
+      if (llamadas.length === 2) return { ok: true, status: 200, json: async () => ({ id: 'media-id-1' }) }
+      return { ok: true, status: 200, json: async () => ({ permalink: 'https://www.instagram.com/p/V2/' }) }
+    }
+
+    const resultado = await publicarInstagram(ctx, { fetchImpl })
+
+    const mediaParams = new URLSearchParams(llamadas[0].opts.body)
+    expect(mediaParams.get('image_url')).toBe('https://media.example.com/data/media/foto.jpg')
+    expect(resultado.ok).toBe(true)
   })
 
   it('caption incluye hashtags; sin hashtags no agrega separador', async () => {

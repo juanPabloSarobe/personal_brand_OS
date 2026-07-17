@@ -20,17 +20,35 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
     if (existsSync(seedPath)) db.exec(readFileSync(seedPath, 'utf8'))
   }
 
-  db.exec(`
-    DELETE FROM channel_versions
-    WHERE id NOT IN (
-      SELECT MAX(id) FROM channel_versions GROUP BY draft_id, profile_channel_id
-    )
-  `)
-
+  // Dedup de channel_versions duplicadas (draft_id, profile_channel_id) previo a
+  // crear el índice único de abajo. Se guarda todo (borrado de publish_log
+  // huérfano + dedup + creación de índice) en un único try/catch: si una fila
+  // "perdedora" (no-MAX) tiene publish_log referenciándola, el DELETE directo
+  // rompería la FK (no hay ON DELETE CASCADE) y tumbaría el arranque para
+  // siempre. Por eso primero limpiamos publish_log de esas filas.
+  // TODO(hardening futuro): en vez de MAX(id) a secas, preferir conservar la
+  // fila con el status más avanzado (publicada > entregada_manual >
+  // programada > aprobada > pendiente > cancelada) para no perder por
+  // accidente una versión ya publicada si quedó con un id menor.
   try {
+    db.exec(`
+      DELETE FROM publish_log
+      WHERE channel_version_id IN (
+        SELECT id FROM channel_versions
+        WHERE id NOT IN (
+          SELECT MAX(id) FROM channel_versions GROUP BY draft_id, profile_channel_id
+        )
+      )
+    `)
+    db.exec(`
+      DELETE FROM channel_versions
+      WHERE id NOT IN (
+        SELECT MAX(id) FROM channel_versions GROUP BY draft_id, profile_channel_id
+      )
+    `)
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_draft_channel ON channel_versions(draft_id, profile_channel_id)")
   } catch (err) {
-    console.error('no se pudo crear idx_cv_draft_channel:', err)
+    console.error('no se pudo deduplicar channel_versions / crear idx_cv_draft_channel:', err)
   }
 
   ensureAdmin(db)

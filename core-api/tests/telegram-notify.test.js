@@ -97,6 +97,35 @@ describe('telegram notifier', () => {
     expect(result.reason).not.toContain('TELEGRAM_BOT_TOKEN')
   })
 
+  it('sendMessage: respuesta HTTP 200 con {ok:false, description} de Telegram preserva el motivo', async () => {
+    const fetchImpl = async () => ({
+      ok: true,
+      json: async () => ({ ok: false, description: 'chat not found' }),
+    })
+
+    const result = await sendMessage('12345', 'test', { fetchImpl })
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('chat not found')
+  })
+
+  it('sendPhotoFile: respuesta HTTP 200 con {ok:false, description} de Telegram preserva el motivo', async () => {
+    const testFile = join(tmpdir(), 'test-photo-' + Date.now() + '.jpg')
+    writeFileSync(testFile, Buffer.from('fake-jpeg-data'))
+
+    const fetchImpl = async () => ({
+      ok: true,
+      json: async () => ({ ok: false, description: 'chat not found' }),
+    })
+
+    const result = await sendPhotoFile('12345', testFile, 'caption', { fetchImpl })
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('chat not found')
+
+    unlinkSync(testFile)
+  })
+
   it('nunca lanza excepciones', async () => {
     const fetchImpl = async () => {
       throw new Error('network error')

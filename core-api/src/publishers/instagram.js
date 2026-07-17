@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, relative, sep } from 'node:path'
 
 const BASE = 'https://graph.facebook.com/v21.0'
 const FALLBACK_URL = 'https://www.instagram.com/'
@@ -31,6 +31,22 @@ function clasificarError(status, body) {
 }
 
 /**
+ * Construye la URL pública de la imagen a partir de media_path, preservando
+ * la subcarpeta (p. ej. "versions/") en la que se guardó el archivo dentro
+ * de MEDIA_DIR. Si media_path no cuelga de MEDIA_DIR (o no se puede resolver
+ * una ruta relativa razonable), cae de vuelta a usar solo el basename en vez
+ * de romper la publicación.
+ */
+function buildImageUrl(mediaBaseUrl, mediaPath) {
+  const mediaDir = process.env.MEDIA_DIR || '/data/media'
+  const rel = relative(mediaDir, mediaPath)
+  if (!rel || rel.startsWith('..')) {
+    return `${mediaBaseUrl}/${basename(mediaPath)}`
+  }
+  return `${mediaBaseUrl}/${rel.split(sep).join('/')}`
+}
+
+/**
  * Publicador Instagram (spec Plan D §Global Constraints / Task 5).
  * Requiere URL pública de la imagen (env MEDIA_PUBLIC_BASE_URL); sin ella
  * degrada honestamente a paquete manual (la API de IG no acepta binario
@@ -56,7 +72,7 @@ export async function publicarInstagram(ctx, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
   const { access_token: accessToken, ig_user_id: igUserId } = credentials
   const caption = armarCaption(version)
-  const imageUrl = `${mediaBaseUrl}/${basename(version.media_path)}`
+  const imageUrl = buildImageUrl(mediaBaseUrl, version.media_path)
 
   try {
     const mediaParams = new URLSearchParams({
