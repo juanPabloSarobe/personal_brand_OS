@@ -34,13 +34,14 @@ describe('canales del perfil', () => {
     const profileId = await withProfile(app)
     await request(app).post(`/api/profiles/${profileId}/channels`)
       .set('X-Telegram-Chat-Id', ADMIN_CHAT)
-      .send({ channel_code: 'linkedin', credentials: { access_token: 'tok' } })
+      .send({ channel_code: 'linkedin', credentials: { access_token: 'secret-cred-xyz' } })
     const res = await request(app).get(`/api/profiles/${profileId}/channels`)
       .set('X-Telegram-Chat-Id', ADMIN_CHAT)
     expect(res.status).toBe(200)
     expect(res.body[0].has_credentials).toBe(true)
-    expect(JSON.stringify(res.body)).not.toContain('tok')
+    expect(JSON.stringify(res.body)).not.toContain('secret-cred-xyz')
     expect(res.body[0].credentials_enc).toBeUndefined()
+    expect(res.body[0]).toHaveProperty('token_expires_at')
   })
 
   it('editor no gestiona canales (solo owner)', async () => {

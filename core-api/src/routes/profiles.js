@@ -93,10 +93,14 @@ export function profilesRouter(db) {
       JOIN channels c ON c.id = pc.channel_id
       WHERE pc.profile_id = ?
     `).all(id)
-    res.json(rows.map(row => {
-      const { token_expires_at, ...safe } = row
-      return { ...safe, has_credentials: !!row.has_credentials }
-    }))
+    res.json(rows.map(row => ({
+      channel_code: row.channel_code,
+      channel_name: row.channel_name,
+      handle: row.handle,
+      status: row.status,
+      token_expires_at: row.token_expires_at,
+      has_credentials: !!row.has_credentials
+    })))
   })
 
   return r
