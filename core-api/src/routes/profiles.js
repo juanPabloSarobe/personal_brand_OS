@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { can } from '../permissions.js'
+import { encryptJson } from '../crypto.js'
 
 const EDITABLE = ['name', 'identity_json', 'cadence_json', 'format_strategy_json', 'ai_overrides_json', 'visual_template']
 
@@ -57,6 +58,45 @@ export function profilesRouter(db) {
     vals.push(id)
     db.prepare(`UPDATE brand_profiles SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
     res.json({ ok: true })
+  })
+
+  r.post('/:id/channels', (req, res) => {
+    const id = Number(req.params.id)
+    if (!can(db, req.user.id, id, 'gestionar_canales')) {
+      return res.status(403).json({ error: 'solo owner gestiona canales' })
+    }
+    const { channel_code, handle = null, credentials = null, token_expires_at = null } = req.body
+    const channel = db.prepare('SELECT id FROM channels WHERE code = ?').get(channel_code)
+    if (!channel) return res.status(400).json({ error: `canal desconocido: ${channel_code}` })
+
+    const enc = credentials ? encryptJson(credentials) : null
+    const status = credentials ? 'conectado' : 'desconectado'
+    db.prepare(`
+      INSERT INTO profile_channels (profile_id, channel_id, handle, credentials_enc, status, token_expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (profile_id, channel_id) DO UPDATE SET
+        handle = excluded.handle,
+        credentials_enc = COALESCE(excluded.credentials_enc, credentials_enc),
+        status = excluded.status,
+        token_expires_at = excluded.token_expires_at
+    `).run(id, channel.id, handle, enc, status, token_expires_at)
+    res.status(201).json({ ok: true })
+  })
+
+  r.get('/:id/channels', (req, res) => {
+    const id = Number(req.params.id)
+    if (!can(db, req.user.id, id, 'ver_perfil')) return res.status(403).json({ error: 'sin acceso al perfil' })
+    const rows = db.prepare(`
+      SELECT c.code AS channel_code, c.name AS channel_name, pc.handle, pc.status,
+             pc.token_expires_at, (pc.credentials_enc IS NOT NULL) AS has_credentials
+      FROM profile_channels pc
+      JOIN channels c ON c.id = pc.channel_id
+      WHERE pc.profile_id = ?
+    `).all(id)
+    res.json(rows.map(row => {
+      const { token_expires_at, ...safe } = row
+      return { ...safe, has_credentials: !!row.has_credentials }
+    }))
   })
 
   return r
