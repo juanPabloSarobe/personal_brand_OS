@@ -7,6 +7,8 @@ import {
 } from '../services/editorial.js'
 import { proponerIdea, redactarBoceto, refinarBoceto, adaptarVersion } from '../services/redactor.js'
 import { renderChannelImage, FORMAT_DIMENSIONS } from '../services/imagen.js'
+import { processEvidence } from '../services/evidence-pipeline.js'
+import { entitiesFor } from '../services/entities-store.js'
 import { AiError } from '../ai/client.js'
 import { can } from '../permissions.js'
 
@@ -135,8 +137,9 @@ async function handleEvidencia(db, user, chatId, evidencia, opts) {
     })
     if (raw) db.prepare('UPDATE ideas SET raw_llm_json = ? WHERE id = ?').run(JSON.stringify(raw), ideaId)
     setSession(db, user.id, chatId, 'proponiendo_idea', { ideaId })
+    const folioLinea = evidencia?.folio ? `📥 ${evidencia.folio}\n\n` : ''
     return {
-      texto: `💡 *${title}*${summary ? `\n${summary}` : ''}\n\n¿Qué hacemos con esto?`,
+      texto: `${folioLinea}💡 *${title}*${summary ? `\n${summary}` : ''}\n\n¿Qué hacemos con esto?`,
       botones: BOTONES_IDEA,
       estado: 'proponiendo_idea',
     }
@@ -198,7 +201,30 @@ async function handleTexto(db, user, chatId, input, opts) {
     setSession(db, user.id, chatId, 'refinando_boceto', { ideaId, profileId, draftId, queue })
     return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
   }
+  if (session.state === 'inicio' || !session.state) return handleTextoCaptura(db, user, chatId, input, opts)
   return textoGuia(session)
+}
+
+// texto en 'inicio' (o sin sesión) = captura de evidencia, igual que clase 'evidencia'
+async function handleTextoCaptura(db, user, chatId, input, opts) {
+  const info = db.prepare(`
+    INSERT INTO evidence (user_id, type, text_content) VALUES (?, 'texto', ?)
+  `).run(user.id, input.texto)
+  const id = info.lastInsertRowid
+  const result = await processEvidence(db, id, { fetchImpl: opts?.fetchImpl })
+  const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(id)
+  const entities = entitiesFor(db, id)
+  const evidencia = {
+    id,
+    folio: `E-${String(id).padStart(4, '0')}`,
+    processed: result.processed,
+    detalle: {
+      transcription: fila.transcription,
+      vision_description: fila.vision_description,
+      entities,
+    },
+  }
+  return handleEvidencia(db, user, chatId, evidencia, opts)
 }
 
 // ---------------------------------------------------------------------------

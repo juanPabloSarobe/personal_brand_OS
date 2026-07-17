@@ -3,20 +3,13 @@ import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { processEvidence } from '../services/evidence-pipeline.js'
+import { entitiesFor } from '../services/entities-store.js'
 
 const TYPES = ['foto', 'audio', 'video', 'texto', 'link']
 const BINARY_TYPES = ['foto', 'audio', 'video']
 
 function isValidBase64(s) {
   return typeof s === 'string' && s.length > 0 && s.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s)
-}
-
-function entitiesFor(db, evidenceId) {
-  return db.prepare(`
-    SELECT e.kind, e.name FROM entity_mentions m
-    JOIN entities e ON e.id = m.entity_id
-    WHERE m.evidence_id = ? ORDER BY e.id
-  `).all(evidenceId)
 }
 
 export function evidenceRouter(db) {

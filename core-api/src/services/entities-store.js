@@ -1,3 +1,11 @@
+export function entitiesFor(db, evidenceId) {
+  return db.prepare(`
+    SELECT e.kind, e.name FROM entity_mentions m
+    JOIN entities e ON e.id = m.entity_id
+    WHERE m.evidence_id = ? ORDER BY e.id
+  `).all(evidenceId)
+}
+
 export function recordMentions(db, { evidenceId = null, ideaId = null }, entities) {
   const out = []
   const upsert = db.prepare('INSERT INTO entities (kind, name) VALUES (?, ?) ON CONFLICT (kind, name) DO NOTHING')
