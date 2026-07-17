@@ -2,6 +2,7 @@ import express from 'express'
 import { authMiddleware } from './auth.js'
 import { profilesRouter } from './routes/profiles.js'
 import { evidenceRouter } from './routes/evidence.js'
+import { agentRouter } from './routes/agent.js'
 
 export function createApp(db, { aiFetch } = {}) {
   const app = express()
@@ -17,6 +18,7 @@ export function createApp(db, { aiFetch } = {}) {
     })
     api.use('/profiles', profilesRouter(db))
     api.use('/evidence', evidenceRouter(db))
+    api.use('/agent', agentRouter(db))
     app.use('/api', api)
     app.locals.api = api // los routers de rutas se montan acá en tasks siguientes
     app.locals.aiFetch = aiFetch
