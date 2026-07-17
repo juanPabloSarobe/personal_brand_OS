@@ -20,7 +20,18 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
     if (existsSync(seedPath)) db.exec(readFileSync(seedPath, 'utf8'))
   }
 
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_draft_channel ON channel_versions(draft_id, profile_channel_id)")
+  db.exec(`
+    DELETE FROM channel_versions
+    WHERE id NOT IN (
+      SELECT MAX(id) FROM channel_versions GROUP BY draft_id, profile_channel_id
+    )
+  `)
+
+  try {
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_draft_channel ON channel_versions(draft_id, profile_channel_id)")
+  } catch (err) {
+    console.error('no se pudo crear idx_cv_draft_channel:', err)
+  }
 
   ensureAdmin(db)
   return db

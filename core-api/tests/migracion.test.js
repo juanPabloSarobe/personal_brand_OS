@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import Database from 'better-sqlite3'
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openDb } from '../src/db.js'
 import { makeTestApp } from './helpers.js'
 import {
   createIdea, linkIdeaProfiles, createDraft, setDraftStatus, createChannelVersion, pendingFor,
 } from '../src/services/editorial.js'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const SRC = path.join(HERE, '..', 'src')
 
 function freshDb() {
   process.env.ADMIN_CHAT_ID = '111'
@@ -94,5 +99,73 @@ describe('migración: índice único de versiones', () => {
     const entry = p.aprobados.find((a) => a.id === draftSinVersion)
     expect(entry.profile).toBe('JP')
     expect(entry.title).toBe('Sin versión')
+  })
+
+  it('DB existente con duplicados: dedup y el índice se crea igual', () => {
+    process.env.ADMIN_CHAT_ID = '111'
+    process.env.ADMIN_NAME = 'Juan Pablo'
+    const dir = mkdtempSync(path.join(tmpdir(), 'pbos-migracion-'))
+    const dbPath = path.join(dir, 'test.db')
+
+    // Construir la DB "a mano" replicando openDb SIN crear el índice único,
+    // simulando una DB preexistente creada antes de la migración.
+    const raw = new Database(dbPath)
+    raw.pragma('journal_mode = WAL')
+    raw.pragma('foreign_keys = ON')
+    raw.exec(readFileSync(path.join(SRC, 'schema.sql'), 'utf8'))
+    const seedPath = path.join(SRC, 'seed.sql')
+    if (existsSync(seedPath)) raw.exec(readFileSync(seedPath, 'utf8'))
+
+    const userId = raw.prepare(
+      "INSERT INTO users (telegram_chat_id, name, status, is_admin) VALUES ('111', 'Juan Pablo', 'activo', 1)"
+    ).run().lastInsertRowid
+    const profileId = raw.prepare(
+      "INSERT INTO brand_profiles (name, slug) VALUES ('JP','jp')"
+    ).run().lastInsertRowid
+    const evId = raw.prepare(
+      "INSERT INTO evidence (user_id, type, text_content) VALUES (?, 'texto', 'x')"
+    ).run(userId).lastInsertRowid
+    const ideaId = raw.prepare(
+      "INSERT INTO ideas (created_by, title, summary) VALUES (?, 'T', NULL)"
+    ).run(userId).lastInsertRowid
+    raw.prepare(
+      'INSERT INTO idea_evidence (idea_id, evidence_id) VALUES (?, ?)'
+    ).run(ideaId, evId)
+    const draftId = raw.prepare(
+      "INSERT INTO drafts (idea_id, profile_id, content) VALUES (?, ?, 'v1')"
+    ).run(ideaId, profileId).lastInsertRowid
+    const chId = raw.prepare("SELECT id FROM channels WHERE code='linkedin'").get().id
+    const pcId = raw.prepare(
+      "INSERT INTO profile_channels (profile_id, channel_id, status) VALUES (?, ?, 'conectado')"
+    ).run(profileId, chId).lastInsertRowid
+
+    // Dos versiones con el mismo (draft_id, profile_channel_id) — posible porque
+    // el índice único aún no existe.
+    raw.prepare(`
+      INSERT INTO channel_versions (draft_id, profile_channel_id, format_code, text_content)
+      VALUES (?, ?, 'texto', 'v1')
+    `).run(draftId, pcId)
+    const lastId = raw.prepare(`
+      INSERT INTO channel_versions (draft_id, profile_channel_id, format_code, text_content)
+      VALUES (?, ?, 'texto', 'v2')
+    `).run(draftId, pcId).lastInsertRowid
+
+    const idxBefore = raw.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_cv_draft_channel'"
+    ).get()
+    expect(idxBefore).toBeFalsy()
+    raw.close()
+
+    expect(() => openDb({ dbPath })).not.toThrow()
+
+    const db = openDb({ dbPath })
+    const rows = db.prepare('SELECT id FROM channel_versions').all()
+    expect(rows.length).toBe(1)
+    expect(rows[0].id).toBe(lastId)
+
+    const idx = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_cv_draft_channel'"
+    ).get()
+    expect(idx).toBeTruthy()
   })
 })
