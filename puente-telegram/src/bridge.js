@@ -58,6 +58,8 @@ export async function forwardUpdate(update, deps) {
 
 export async function runOnce(offset, deps) {
   const log = deps.log || console
+  // default a fetch real: en producción deps no trae fetchImpl
+  const fetchImpl = deps.fetchImpl || fetch
   const updates = await fetchUpdates(offset, deps)
   let next = offset
   for (const u of updates) {
@@ -69,7 +71,7 @@ export async function runOnce(offset, deps) {
       const mapped = mapUpdate(u)
       if (mapped) {
         try {
-          await deps.fetchImpl(`${api(deps.token)}/sendMessage`, {
+          await fetchImpl(`${api(deps.token)}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: mapped.chatId, text: '⚠️ No pude procesar ese mensaje. Probá de nuevo en un rato.' }),

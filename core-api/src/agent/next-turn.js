@@ -210,32 +210,28 @@ async function handleTextoCaptura(db, user, chatId, input, opts) {
   let evidenceId
   try {
     const info = db.prepare(`
-      INSERT INTO evidence (user_id, type, text_content) VALUES (?, 'texto', ?)
-    `).run(user.id, input.texto)
+      INSERT INTO evidence (user_id, type, text_content, context_json) VALUES (?, 'texto', ?, ?)
+    `).run(user.id, input.texto, '{"origen":"telegram"}')
     evidenceId = info.lastInsertRowid
   } catch (err) {
     console.error('captura texto falló:', err)
     return { texto: '⚠️ No pude guardar tu texto. Mandámelo de nuevo en un momento.', botones: [], estado: 'inicio' }
   }
 
-  try {
-    const result = await processEvidence(db, evidenceId, { fetchImpl: opts?.fetchImpl })
-    const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(evidenceId)
-    const entities = entitiesFor(db, evidenceId)
-    const evidencia = {
-      id: evidenceId,
-      folio: `E-${String(evidenceId).padStart(4, '0')}`,
-      processed: result.processed,
-      detalle: {
-        transcription: fila.transcription,
-        vision_description: fila.vision_description,
-        entities,
-      },
-    }
-    return handleEvidencia(db, user, chatId, evidencia, opts)
-  } catch (err) {
-    throw err
+  const result = await processEvidence(db, evidenceId, { fetchImpl: opts?.fetchImpl })
+  const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(evidenceId)
+  const entities = entitiesFor(db, evidenceId)
+  const evidencia = {
+    id: evidenceId,
+    folio: `E-${String(evidenceId).padStart(4, '0')}`,
+    processed: result.processed,
+    detalle: {
+      transcription: fila.transcription,
+      vision_description: fila.vision_description,
+      entities,
+    },
   }
+  return handleEvidencia(db, user, chatId, evidencia, opts)
 }
 
 // ---------------------------------------------------------------------------

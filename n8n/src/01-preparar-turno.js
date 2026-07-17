@@ -16,7 +16,7 @@ if (b.tipo === 'comando' && b.comando === '/start') {
 }
 
 if (b.tipo === 'comando') {
-  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'comando', comando: b.comando } } }]
+  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'comando', comando: b.texto || b.comando } } }]
 }
 
 if (b.tipo === 'texto') {

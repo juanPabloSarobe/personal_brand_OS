@@ -64,3 +64,13 @@ describe('texto en inicio = captura', () => {
     expect(res.botones).toEqual([])
   })
 })
+
+describe('/idea con argumento', () => {
+  it('crea la idea con ese título', async () => {
+    const { db, user } = setup()
+    const res = await nextTurn(db, user, '111', { clase: 'comando', comando: '/idea Lanzar newsletter' }, {})
+    expect(res.estado).toBe('proponiendo_idea')
+    const idea = db.prepare("SELECT * FROM ideas WHERE title='Lanzar newsletter'").get()
+    expect(idea).toBeTruthy()
+  })
+})

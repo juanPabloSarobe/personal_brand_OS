@@ -27,6 +27,13 @@ describe('nodo 01: preparar turno', () => {
     const [cola] = runCodeNode('01-preparar-turno.js', { json: { body: { chatId: '9', tipo: 'comando', comando: '/cola', texto: '/cola' } } })
     expect(cola.json.input).toEqual({ clase: 'comando', comando: '/cola' })
   })
+
+  it('/idea con argumento conserva el texto completo', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'comando', comando: '/idea', texto: '/idea Lanzar newsletter' } },
+    })
+    expect(out.json.input.comando).toBe('/idea Lanzar newsletter')
+  })
 })
 
 describe('nodo 03: armar turno evidencia', () => {
