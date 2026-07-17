@@ -21,10 +21,13 @@ export async function chat(task, messages, { json = false, fetchImpl = fetch } =
       messages,
       ...(json ? { response_format: { type: 'json_object' } } : {}),
     }),
+    signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) throw new AiError(`IA ${provider}/${model} respondió ${res.status}: ${await res.text()}`)
   const raw = await res.json()
-  return { content: raw.choices[0].message.content, raw }
+  const content = raw.choices?.[0]?.message?.content
+  if (content === undefined) throw new AiError('respuesta de IA sin choices')
+  return { content, raw }
 }
 
 export async function transcribe(buffer, filename, { fetchImpl = fetch } = {}) {
@@ -36,9 +39,11 @@ export async function transcribe(buffer, filename, { fetchImpl = fetch } = {}) {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth(provider)}` },
     body: form,
+    signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) throw new AiError(`IA ${provider}/${model} respondió ${res.status}: ${await res.text()}`)
   const raw = await res.json()
+  if (typeof raw.text !== 'string') throw new AiError('respuesta de IA sin texto')
   return { text: raw.text, raw }
 }
 

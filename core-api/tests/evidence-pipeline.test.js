@@ -81,6 +81,25 @@ describe('pipeline de evidencia', () => {
     expect(JSON.parse(row.raw_llm_json).error).toMatch(/503/)
   })
 
+  it('éxito parcial: transcripción persistida aunque fallen las entidades', async () => {
+    const { db } = makeTestApp()
+    process.env.GROQ_API_KEY = 'gsk-test'
+    const p = mediaFile('nota3.ogg', 'audio')
+    const id = insertEvidence(db, { type: 'audio', filePath: p })
+    const res = await processEvidence(db, id, {
+      fetchImpl: async (url) => {
+        if (url.includes('/audio/transcriptions')) {
+          return { ok: true, json: async () => ({ text: 'hola SkyTrace' }) }
+        }
+        return { ok: false, status: 500, text: async () => 'boom' }
+      },
+    })
+    expect(res.processed).toBe(false)
+    const row = db.prepare('SELECT * FROM evidence WHERE id = ?').get(id)
+    expect(row.transcription).toBe('hola SkyTrace')
+    expect(JSON.parse(row.raw_llm_json).error).toBeTruthy()
+  })
+
   it('evidencia inexistente', async () => {
     const { db } = makeTestApp()
     const res = await processEvidence(db, 9999)

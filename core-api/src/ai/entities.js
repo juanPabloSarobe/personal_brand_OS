@@ -17,7 +17,7 @@ export async function extractEntities(text, { fetchImpl } = {}) {
   try { parsed = JSON.parse(content) } catch {
     throw new AiError('el LLM no devolvió JSON válido para entidades')
   }
-  const list = Array.isArray(parsed.entidades) ? parsed.entidades : []
+  const list = Array.isArray(parsed?.entidades) ? parsed.entidades : []
   const entities = list.filter(e =>
     e && KINDS.includes(e.kind) && typeof e.name === 'string' && e.name.trim().length > 0
   ).map(e => ({ kind: e.kind, name: e.name.trim() }))

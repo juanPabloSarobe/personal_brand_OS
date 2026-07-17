@@ -5,7 +5,7 @@ links) por Telegram y el sistema la convierte en contenido profesional por marca
 publicado en tus redes.
 
 - **Diseño:** [`docs/superpowers/specs/2026-07-17-personal-brand-os-v1-design.md`](docs/superpowers/specs/2026-07-17-personal-brand-os-v1-design.md)
-- **Estado:** Plan A (cimientos core-api) — ver `docs/superpowers/plans/`
+- **Estado:** Plan B1 (capa de IA + evidencia) — ver `docs/superpowers/plans/`
 
 ## Levantar en la Mac mini
 

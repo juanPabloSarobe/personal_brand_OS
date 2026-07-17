@@ -11,7 +11,7 @@ export async function processEvidence(db, evidenceId, { fetchImpl } = {}) {
   try {
     ev = db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidenceId)
   } catch (err) {
-    return { processed: false, reason: 'id inválido: ' + String(err) }
+    return { processed: false, reason: 'consulta falló: ' + String(err) }
   }
   if (!ev) return { processed: false, reason: 'inexistente' }
   if (!process.env.GROQ_API_KEY) return { processed: false, reason: 'sin GROQ_API_KEY' }

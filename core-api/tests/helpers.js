@@ -10,6 +10,7 @@ export function makeTestApp() {
   process.env.MASTER_KEY = 'ab'.repeat(32)
   process.env.ADMIN_CHAT_ID = ADMIN_CHAT
   process.env.ADMIN_NAME = 'Juan Pablo'
+  delete process.env.GROQ_API_KEY
   const dir = mkdtempSync(path.join(tmpdir(), 'pbos-'))
   process.env.MEDIA_DIR = path.join(dir, 'media')
   const db = openDb({ dbPath: path.join(dir, 'test.db') })
