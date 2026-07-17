@@ -85,4 +85,14 @@ describe('perfiles de marca', () => {
     expect(putRes.status).toBe(500)
     expect(putRes.body).toEqual({ error: 'error interno' })
   })
+
+  it('JSON malformado devuelve 400, no 500', async () => {
+    const { app } = makeTestApp()
+    const res = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .set('Content-Type', 'application/json')
+      .send('{oops')
+    expect(res.status).toBe(400)
+    expect(res.body).toEqual({ error: 'solicitud inválida' })
+  })
 })

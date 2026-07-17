@@ -77,8 +77,8 @@ export function profilesRouter(db) {
       ON CONFLICT (profile_id, channel_id) DO UPDATE SET
         handle = excluded.handle,
         credentials_enc = COALESCE(excluded.credentials_enc, credentials_enc),
-        status = excluded.status,
-        token_expires_at = excluded.token_expires_at
+        status = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.status ELSE profile_channels.status END,
+        token_expires_at = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.token_expires_at ELSE profile_channels.token_expires_at END
     `).run(id, channel.id, handle, enc, status, token_expires_at)
     res.status(201).json({ ok: true })
   })

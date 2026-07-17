@@ -64,4 +64,32 @@ describe('canales del perfil', () => {
       .send({ channel_code: 'myspace' })
     expect(res.status).toBe(400)
   })
+
+  it('re-conectar sin credenciales preserva status y expiración', async () => {
+    const { app } = makeTestApp()
+    const profileId = await withProfile(app)
+    const connect = await request(app).post(`/api/profiles/${profileId}/channels`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({
+        channel_code: 'linkedin',
+        handle: 'juanpablosarobe',
+        credentials: { access_token: 'tok-li-1' },
+        token_expires_at: '2026-09-01'
+      })
+    expect(connect.status).toBe(201)
+
+    const update = await request(app).post(`/api/profiles/${profileId}/channels`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ channel_code: 'linkedin', handle: 'nuevo-handle' })
+    expect(update.status).toBe(201)
+
+    const res = await request(app).get(`/api/profiles/${profileId}/channels`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+    expect(res.status).toBe(200)
+    const row = res.body.find(c => c.channel_code === 'linkedin')
+    expect(row.status).toBe('conectado')
+    expect(row.token_expires_at).toBe('2026-09-01')
+    expect(row.has_credentials).toBe(true)
+    expect(row.handle).toBe('nuevo-handle')
+  })
 })

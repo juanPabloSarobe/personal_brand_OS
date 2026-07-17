@@ -26,7 +26,10 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
 
 function ensureAdmin(db) {
   const chatId = process.env.ADMIN_CHAT_ID
-  if (!chatId) return
+  if (!chatId) {
+    console.warn('ADMIN_CHAT_ID no configurado: no se creó usuario administrador')
+    return
+  }
   const exists = db.prepare('SELECT id FROM users WHERE telegram_chat_id = ?').get(String(chatId))
   if (!exists) {
     db.prepare(

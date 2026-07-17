@@ -43,4 +43,18 @@ describe('matriz de permisos', () => {
     const { db, owner, profile } = setup()
     expect(() => can(db, owner, profile, 'publicar_sin_aprobar')).toThrow(/desconocida/)
   })
+
+  it('approver aprueba y programa pero no administra el perfil', () => {
+    const { db, profile } = setup()
+    addUser(db, '444', 'Aprobadora')
+    const approver = db.prepare("SELECT id FROM users WHERE telegram_chat_id='444'").get().id
+    db.prepare("INSERT INTO user_profile_access VALUES (?, ?, 'approver')").run(approver, profile)
+
+    expect(can(db, approver, profile, 'aprobar')).toBe(true)
+    expect(can(db, approver, profile, 'programar')).toBe(true)
+    expect(can(db, approver, profile, 'capturar')).toBe(true)
+    expect(can(db, approver, profile, 'editar_perfil')).toBe(false)
+    expect(can(db, approver, profile, 'gestionar_canales')).toBe(false)
+    expect(can(db, approver, profile, 'invitar')).toBe(false)
+  })
 })
