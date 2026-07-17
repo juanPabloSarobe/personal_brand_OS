@@ -54,4 +54,31 @@ describe('openDb', () => {
     const count = db.prepare('SELECT COUNT(*) AS n FROM users WHERE telegram_chat_id = ?').get('111')
     expect(count.n).toBe(1)
   })
+
+  it('siembra el catálogo de canales del máster plan', () => {
+    const db = freshDb()
+    const codes = db.prepare('SELECT code, status FROM channels ORDER BY code').all()
+    const byCode = Object.fromEntries(codes.map(c => [c.code, c.status]))
+    expect(byCode.linkedin).toBe('activo')
+    expect(byCode.instagram).toBe('activo')
+    expect(byCode.wa_status).toBe('activo')
+    expect(byCode.x).toBe('planificado')
+    expect(byCode.tiktok).toBe('planificado')
+    expect(byCode.youtube).toBe('planificado')
+  })
+
+  it('siembra formatos con bandera de automatizable', () => {
+    const db = freshDb()
+    const li = db.prepare(`
+      SELECT f.code, f.automatable FROM channel_formats f
+      JOIN channels c ON c.id = f.channel_id WHERE c.code = 'linkedin'
+    `).all()
+    const codes = li.map(f => f.code)
+    expect(codes).toEqual(expect.arrayContaining(['texto', 'imagen', 'video', 'documento']))
+    const wa = db.prepare(`
+      SELECT f.automatable FROM channel_formats f
+      JOIN channels c ON c.id = f.channel_id WHERE c.code = 'wa_status'
+    `).get()
+    expect(wa.automatable).toBe(0)
+  })
 })
