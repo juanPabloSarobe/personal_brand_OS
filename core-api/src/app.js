@@ -3,7 +3,7 @@ import { authMiddleware } from './auth.js'
 import { profilesRouter } from './routes/profiles.js'
 import { evidenceRouter } from './routes/evidence.js'
 
-export function createApp(db) {
+export function createApp(db, { aiFetch } = {}) {
   const app = express()
   app.use(express.json({ limit: '50mb' })) // evidencia entra como base64
   app.get('/health', (_req, res) => res.json({ ok: true }))
@@ -19,6 +19,7 @@ export function createApp(db) {
     api.use('/evidence', evidenceRouter(db))
     app.use('/api', api)
     app.locals.api = api // los routers de rutas se montan acá en tasks siguientes
+    app.locals.aiFetch = aiFetch
   }
 
   app.use((err, _req, res, _next) => {
