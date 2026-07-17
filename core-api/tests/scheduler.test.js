@@ -48,6 +48,20 @@ function logAttemptAt(db, versionId, attempt, ok, createdAtExpr) {
   `).run(versionId, attempt, ok ? 1 : 0)
 }
 
+/**
+ * Inserta una fila de publish_log ya marcada `degrade_decidido:true` (como
+ * las que escribe degradar()), con created_at controlado, para sembrar
+ * directamente un estado de degradación ya decidido sin pasar por el flujo
+ * real de publicación/degradación.
+ */
+function logDegradeAttemptAt(db, versionId, attempt, createdAtExpr) {
+  const responseJson = JSON.stringify({ motivo: 'seed', manual: { ok: false }, degrade_decidido: true })
+  db.prepare(`
+    INSERT INTO publish_log (channel_version_id, attempt, ok, response_json, created_at)
+    VALUES (?, ?, 0, ?, ${createdAtExpr})
+  `).run(versionId, attempt, responseJson)
+}
+
 describe('scheduler: reintentos y degradación', () => {
   beforeEach(() => {
     process.env.TELEGRAM_BOT_TOKEN = 'tok-test'
@@ -320,6 +334,55 @@ describe('scheduler: reintentos y degradación', () => {
     // A través de todo el test, el canal real (linkedin) se llamó como
     // mucho una vez: degrade_decidido evita volver a llamarlo.
     expect(linkedinCalls).toBe(1)
+  })
+
+  it('degradación llegado el piso de 15 minutos no reintenta antes de tiempo', async () => {
+    const { db } = makeTestApp()
+    const { versionId } = buildFixture(db, { channelCode: 'linkedin' })
+
+    const fetchImpl = async (url) => {
+      if (url.includes('api.telegram.org')) {
+        return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'telegram caído' }
+      }
+      throw new Error('fetch inesperado: ' + url)
+    }
+
+    // Sembramos directamente 3 intentos de degradación ya decididos (marcador
+    // degrade_decidido), el último hace 10 minutos. Con intentosDegrade=3,
+    // MINUTOS_BACKOFF no tiene entrada para 3 (solo 1 y 2), así que
+    // backoffCumplido cae al tope TOPE_MINUTOS_BACKOFF_DEGRADE=15min.
+    logDegradeAttemptAt(db, versionId, 1, "datetime('now', '-40 minutes')")
+    logDegradeAttemptAt(db, versionId, 2, "datetime('now', '-25 minutes')")
+    logDegradeAttemptAt(db, versionId, 3, "datetime('now', '-10 minutes')")
+
+    // Con solo 10 minutos desde el último intento (< piso de 15min), el
+    // backoff NO está cumplido: no debe reintentar la entrega manual todavía,
+    // no debe agregar ninguna fila nueva a publish_log.
+    const r1 = await tick(db, { fetchImpl })
+    expect(r1).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+
+    let logs = db.prepare('SELECT * FROM publish_log WHERE channel_version_id = ? ORDER BY id').all(versionId)
+    expect(logs).toHaveLength(3) // el piso de 15min sigue vigente, no bajó a los 5min de intentosDegrade=2
+
+    let row = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(versionId)
+    expect(row.status).toBe('programada')
+
+    // Movemos el último intento de degradación a 16 minutos atrás: ahora el
+    // piso de 15min sí está cumplido y debe reintentar la entrega manual
+    // (attempt 4, todavía marcado degrade_decidido).
+    db.prepare(`UPDATE publish_log SET created_at = datetime('now', '-16 minutes') WHERE id = ?`)
+      .run(logs[2].id)
+
+    const r2 = await tick(db, { fetchImpl })
+    expect(r2).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+
+    logs = db.prepare('SELECT * FROM publish_log WHERE channel_version_id = ? ORDER BY id').all(versionId)
+    expect(logs).toHaveLength(4)
+    expect(logs[3].attempt).toBe(4)
+    expect(JSON.parse(logs[3].response_json).degrade_decidido).toBe(true)
+
+    row = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(versionId)
+    expect(row.status).toBe('programada') // Telegram sigue caído: no se marca entregada_manual
   })
 
   it('una version que lanza no aborta el resto del lote', async () => {
