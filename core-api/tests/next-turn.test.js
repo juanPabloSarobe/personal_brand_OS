@@ -144,6 +144,21 @@ describe('next-turn', () => {
     expect(res.estado).toBe('inicio')
   })
 
+  it('/cola muestra bocetos aprobados sin canal (aprobados sin channel_versions)', async () => {
+    const { db, user, ids } = setup()
+    const ideaId = db.prepare(
+      "INSERT INTO ideas (created_by, title, status) VALUES (?, 'Boceto sin canal', 'en_conversacion')"
+    ).run(user.id).lastInsertRowid
+    db.prepare(
+      "INSERT INTO drafts (idea_id, profile_id, content, status) VALUES (?, ?, 'contenido', 'aprobado')"
+    ).run(ideaId, ids[0])
+
+    const res = await nextTurn(db, user, '111', { clase: 'comando', comando: '/cola' }, {})
+    expect(res.texto).toContain('Aprobados sin programar')
+    expect(res.texto).toContain('Boceto sin canal')
+    expect(res.texto).toContain('Juan Pablo')
+  })
+
   it('editor no puede aprobar (matriz de permisos)', async () => {
     const { db, user, ids, evidencia } = setup()
     db.prepare('UPDATE user_profile_access SET role = ? WHERE user_id = ? AND profile_id = ?')

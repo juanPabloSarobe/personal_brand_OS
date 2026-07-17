@@ -9,6 +9,9 @@ const AYUDA = [
   '/start — esta ayuda',
   '/cola — ver qué tenés pendiente',
   '/idea <texto> — cargar una idea directamente',
+  '/marca <nombre> — crear una marca nueva (solo admin)',
+  '/invitar [rol] — generar un código para sumar a alguien (solo owner)',
+  '/conectar — sumar LinkedIn o Instagram a una marca (solo owner)',
 ].join('\n')
 
 if (b.tipo === 'comando' && b.comando === '/start') {

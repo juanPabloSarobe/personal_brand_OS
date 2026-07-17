@@ -10,10 +10,16 @@ publicado en tus redes.
 ## Levantar en la Mac mini
 
 ```bash
-cp .env.example .env   # completar MASTER_KEY (openssl rand -hex 32) y ADMIN_CHAT_ID
+cp .env.example .env   # completar MASTER_KEY (openssl rand -hex 32), ADMIN_CHAT_ID
+                        # e INTERNAL_API_SECRET (openssl rand -hex 32, igual que MASTER_KEY)
 docker compose up -d --build
 curl http://localhost:3000/health   # → {"ok":true}
 ```
+
+**`INTERNAL_API_SECRET` es obligatorio** para que funcione el sistema de invitaciones
+(`/unirme <código>`): sin él, la redención de invitaciones falla de forma silenciosa (fail-closed
+por diseño — nunca da de alta a alguien sin validar bien). Generarlo igual que `MASTER_KEY`:
+`openssl rand -hex 32`.
 
 ### IA (opcional pero recomendado)
 
@@ -58,11 +64,15 @@ La Mac mini no expone ningún puerto a Internet: el puente sale a buscar los men
 **IMPORTANTE (primera vez):**
 - Abrir [http://localhost:5678](http://localhost:5678) (n8n)
 - Workflows → Import from file → `n8n/workflow.json` → activarlo (toggle **Active**)
-- Verificar que el nodo "Switch camino" muestre exactamente **3 salidas** sin errores de validación:
+- Verificar que el nodo "Switch camino" muestre exactamente **4 salidas** sin errores de validación:
   1. `evidencia` (foto/audio/video)
   2. `turno` (texto/botón/comando)
   3. `ayuda` (fallback)
+  4. `unirme` (`/unirme <código>`, redención de invitaciones)
 - Si el import falla, regenerar con `node n8n/build-workflow.mjs` y re-importar.
+- **Si ya importaste el workflow antes de este cambio**, hay que volver a importar
+  `n8n/workflow.json` (Workflows → Import from file, sobrescribir) para que `/unirme` funcione —
+  si no, esos mensajes se pierden silenciosamente.
 
 ## Publicación automática (Plan D)
 
@@ -92,12 +102,17 @@ Configura `DRY_RUN=1` en `.env` para simular el ciclo completo (aprobado → pro
 
 ### Cargar credenciales de canal
 
-Por ahora, se cargan vía curl. Ejemplo:
+Desde el Plan E, el camino principal es 100% conversacional con `/conectar` (ver más abajo) —
+no requiere curl ni tocar ninguna terminal. Los ejemplos de curl de abajo quedan para scripting
+o uso avanzado; ambos caminos usan el mismo helper interno, así que el resultado es idéntico.
+Como toda la API autenticada, necesitan el header `X-Telegram-Chat-Id` con tu `ADMIN_CHAT_ID`
+(el mismo que autoriza tu usuario en Telegram):
 
 ```bash
 # LinkedIn (access_token + person_urn)
 curl -X POST http://localhost:3000/api/profiles/:profileId/channels \
   -H "Content-Type: application/json" \
+  -H "X-Telegram-Chat-Id: <ADMIN_CHAT_ID>" \
   -d '{
     "channel_code": "linkedin",
     "credentials": {
@@ -109,6 +124,7 @@ curl -X POST http://localhost:3000/api/profiles/:profileId/channels \
 # Instagram (access_token + ig_user_id + MEDIA_PUBLIC_BASE_URL en .env)
 curl -X POST http://localhost:3000/api/profiles/:profileId/channels \
   -H "Content-Type: application/json" \
+  -H "X-Telegram-Chat-Id: <ADMIN_CHAT_ID>" \
   -d '{
     "channel_code": "instagram",
     "credentials": {
@@ -117,11 +133,6 @@ curl -X POST http://localhost:3000/api/profiles/:profileId/channels \
     }
   }'
 ```
-
-**Nota:** desde el Plan E, la carga de credenciales también se puede hacer 100%
-conversacional con `/conectar` (ver más abajo). Este `curl` sigue funcionando
-igual — ambos caminos usan el mismo helper interno, así que el resultado es
-idéntico.
 
 ## Multiusuario e invitaciones (Plan E)
 
@@ -171,10 +182,15 @@ de parar los contenedores.
 
 ### Configurar
 
+Generar un valor y pegarlo (no funciona poner el comando literal en `.env` —
+`.env` no evalúa `$(...)`, quedaría guardado el texto del comando en vez del secreto):
+
 ```bash
-# En .env, agregar una passphrase (no la subas a git, .env ya está en .gitignore):
-BACKUP_PASSPHRASE=$(openssl rand -base64 32)
+openssl rand -base64 32
 ```
+
+Copiar el resultado a `BACKUP_PASSPHRASE=` en `.env` (no lo subas a git, `.env` ya está en
+`.gitignore`).
 
 **Dónde guardar la passphrase:** en un gestor de contraseñas (1Password,
 Bitwarden, o el llavero del Mac). **NUNCA** en el repo, ni en un archivo de
@@ -214,6 +230,10 @@ reemplaza el contenido del volumen `pbos_data` por el del backup, y te avisa
 que levantes todo de nuevo con `docker compose up -d`. **Reemplaza todos los
 datos actuales** — no hay vuelta atrás salvo tener otro backup de antes de
 restaurar.
+
+Si usás Docker Desktop en Mac con file sharing personalizado, asegurate de que la carpeta
+temporal del sistema (`$TMPDIR`, normalmente bajo `/var/folders` o `/private`) esté compartida
+con Docker — por default lo está.
 
 ## OAuth y acceso remoto (Tailscale)
 

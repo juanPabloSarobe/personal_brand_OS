@@ -163,12 +163,22 @@ function sinPermisoEditar(profile) {
   return { texto: `🔒 No tenés permiso para editar bocetos en ${profile.name}.`, botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
 }
 
+// Nombres compuestos solo de emoji/s\u00edmbolos (sin ninguna letra/n\u00famero ASCII tras sacar
+// acentos) slugifican a ''. Un slug vac\u00edo repetido violar\u00eda el UNIQUE de brand_profiles.slug
+// en el segundo intento \u2014 se le agrega un sufijo random corto para que nunca colisione
+// solo por estar vac\u00edo.
 function slugify(name) {
-  return name
+  const base = name
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // saca acentos
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+  if (base) return base
+  return `marca-${crypto.randomBytes(2).toString('hex')}`
+}
+
+function esErrorSlugDuplicado(err) {
+  return err?.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE/i.test(err?.message || '')
 }
 
 function textoGuia(session) {
@@ -227,6 +237,7 @@ async function handleComando(db, user, chatId, input) {
     const lineas = []
     if (p.ideas.length) lineas.push(`💡 Ideas sin desarrollar: ${p.ideas.map((i) => i.title).join(', ')}`)
     if (p.drafts.length) lineas.push(`📝 Bocetos en refinamiento: ${p.drafts.map((d) => `${d.title} (${d.profile})`).join(', ')}`)
+    if (p.aprobados.length) lineas.push(`✅ Aprobados sin programar:\n${p.aprobados.map((d) => `- ${d.title} (${d.profile})`).join('\n')}`)
     if (p.programadas.length) lineas.push(`📅 Programadas: ${p.programadas.map((v) => `${v.channel} ${v.scheduled_at}`).join(', ')}`)
     const texto = lineas.length ? lineas.join('\n') : 'No tenés nada pendiente 🎉'
     return { texto, botones: [], estado: 'inicio' }
@@ -264,7 +275,24 @@ function handleMarcaNueva(db, user, chatId, comando) {
   if (!nombre) {
     return { texto: 'Decime el nombre de la marca, ej. /marca SkyTrace', botones: [], estado: 'inicio' }
   }
-  crearPerfilConWaStatus(db, { name: nombre, slug: slugify(nombre), identity: {}, ownerId: user.id })
+  try {
+    crearPerfilConWaStatus(db, { name: nombre, slug: slugify(nombre), identity: {}, ownerId: user.id })
+  } catch (err) {
+    // el slug sale de slugify(nombre): dos nombres que normalizan igual (ej. "SkyTrace" y
+    // "sky trace") chocan contra el UNIQUE de brand_profiles.slug. No es un fallo real del
+    // sistema (nada se perdió, no se capturó nada en este flujo) — avisamos puntual en vez
+    // de caer en el catch genérico de nextTurn(), que dice "tu material está guardado" y
+    // sería engañoso acá.
+    if (esErrorSlugDuplicado(err)) {
+      setSession(db, user.id, chatId, 'inicio', {})
+      return {
+        texto: '⚠️ Ya existe una marca con ese nombre (o uno muy similar). Probá con otro nombre.',
+        botones: [],
+        estado: 'inicio',
+      }
+    }
+    throw err
+  }
   setSession(db, user.id, chatId, 'inicio', {})
   return {
     texto: `✅ Marca "${nombre}" creada. WhatsApp Status ya está listo para paquetes manuales. Usá /conectar para sumar LinkedIn o Instagram.`,

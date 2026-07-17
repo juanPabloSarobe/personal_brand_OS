@@ -22,7 +22,17 @@ export function profilesRouter(db) {
     if (!req.user.is_admin) return res.status(403).json({ error: 'solo el administrador crea perfiles' })
     const { name, slug, identity = {} } = req.body
     if (!name || !slug) return res.status(400).json({ error: 'name y slug son requeridos' })
-    const profileId = crearPerfilConWaStatus(db, { name, slug, identity, ownerId: req.user.id })
+    let profileId
+    try {
+      profileId = crearPerfilConWaStatus(db, { name, slug, identity, ownerId: req.user.id })
+    } catch (err) {
+      // slug repetido (UNIQUE en brand_profiles.slug): 409 claro en vez del 500 genérico
+      // "error interno" del middleware de errores de app.js.
+      if (err?.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE/i.test(err?.message || '')) {
+        return res.status(409).json({ error: 'ya existe una marca con ese slug' })
+      }
+      throw err
+    }
     res.status(201).json({ id: profileId })
   })
 

@@ -68,6 +68,9 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
 }
 
 function ensureAdmin(db) {
+  if (!process.env.INTERNAL_API_SECRET) {
+    console.warn('INTERNAL_API_SECRET no configurado: la redencion de invitaciones fallara silenciosamente hasta que se defina en .env')
+  }
   const chatId = process.env.ADMIN_CHAT_ID
   if (!chatId) {
     console.warn('ADMIN_CHAT_ID no configurado: no se creó usuario administrador')
