@@ -94,9 +94,38 @@ describe('next-turn', () => {
     expect(prog.estado).toBe('programando')
     const fin = await nextTurn(db, user, '111', { clase: 'boton', boton: 'prog_cola' }, { fetchImpl })
     expect(fin.estado).toBe('inicio')
-    const versiones = db.prepare('SELECT status, format_code FROM channel_versions').all()
+    const versiones = db.prepare('SELECT status, format_code, hashtags FROM channel_versions').all()
     expect(versiones.length).toBeGreaterThan(0)
     expect(versiones.every((v) => v.status === 'aprobada')).toBe(true)
+    expect(versiones.every((v) => v.hashtags === '#a')).toBe(true)
+  })
+
+  it('prog_maniana respeta zona horaria', async () => {
+    process.env.TZ_OFFSET_MINUTES = '-180'
+    const { db, user, evidencia } = setup()
+    const fetchImpl = llmRouter((body) => {
+      const s = JSON.stringify(body.messages)
+      if (s.includes('proponer') || s.includes('evidencia capturada') || s.includes('Evidencia')) {
+        if (body.response_format) {
+          if (s.includes('Adaptá') || s.includes('adaptado')) return '{"texto": "adaptado", "hashtags": "#a"}'
+          return '{"titulo": "T", "resumen": null}'
+        }
+      }
+      if (body.response_format) return '{"texto": "adaptado", "hashtags": "#a"}'
+      return 'borrador'
+    })
+    await nextTurn(db, user, '111', { clase: 'evidencia', evidencia }, { fetchImpl })
+    await nextTurn(db, user, '111', { clase: 'boton', boton: 'idea_desarrollar' }, { fetchImpl })
+    const prog = await nextTurn(db, user, '111', { clase: 'boton', boton: 'boceto_aprobar' }, { fetchImpl })
+    expect(prog.estado).toBe('programando')
+    const fin = await nextTurn(db, user, '111', { clase: 'boton', boton: 'prog_maniana' }, { fetchImpl })
+    expect(fin.estado).toBe('inicio')
+    const versiones = db.prepare('SELECT scheduled_at FROM channel_versions').all()
+    expect(versiones.length).toBeGreaterThan(0)
+    for (const v of versiones) {
+      expect(v.scheduled_at).toMatch(/12:00:00$/)
+    }
+    delete process.env.TZ_OFFSET_MINUTES
   })
 
   it('LLM caído: fallback amable sin romper la sesión', async () => {

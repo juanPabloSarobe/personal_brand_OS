@@ -37,6 +37,7 @@ export async function nextTurn(db, user, chatId, input, { fetchImpl } = {}) {
     return await dispatch(db, user, chatId, input, { fetchImpl })
   } catch (err) {
     // regla de oro: jamás romper la conversación
+    console.error('next-turn error:', err)
     return {
       texto: '⚠️ Algo falló de mi lado. Tu material está guardado — probá de nuevo en un rato.',
       botones: [],
@@ -89,8 +90,16 @@ function nowSql(db) {
   return db.prepare("SELECT datetime('now') AS t").get().t
 }
 
+function tzOffsetMinutes() {
+  const parsed = parseInt(process.env.TZ_OFFSET_MINUTES, 10)
+  return Number.isFinite(parsed) ? parsed : -180
+}
+
 function tomorrowNineSql(db) {
-  return db.prepare("SELECT datetime('now', '+1 day', 'start of day', '+9 hours') AS t").get().t
+  const offset = tzOffsetMinutes()
+  return db.prepare(
+    `SELECT datetime('now', '${offset} minutes', '+1 day', 'start of day', '+9 hours', '${-offset} minutes') AS t`
+  ).get().t
 }
 
 function presentarBoceto(profile, content) {
@@ -114,7 +123,10 @@ function textoGuia(session) {
 // ---------------------------------------------------------------------------
 
 async function handleEvidencia(db, user, chatId, evidencia, opts) {
-  const row = evidencia?.id ? db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidencia.id) : null
+  const row = evidencia?.id
+    ? db.prepare('SELECT * FROM evidence WHERE id = ? AND user_id = ?').get(evidencia.id, user.id)
+    : null
+  if (evidencia?.id && !row) return textoGuia(getSession(db, user.id, chatId))
   try {
     const { title, summary, raw } = await proponerIdea(row ? [row] : [], opts)
     const ideaId = createIdea(db, {
@@ -131,7 +143,7 @@ async function handleEvidencia(db, user, chatId, evidencia, opts) {
   } catch (err) {
     if (!(err instanceof AiError)) throw err
     // la captura nunca se pierde: guardamos la idea en crudo aunque la IA no responda
-    const fallbackTitle = row?.text_content || row?.transcription || row?.vision_description || 'Evidencia sin título'
+    const fallbackTitle = (row?.text_content || row?.transcription || row?.vision_description || 'Evidencia sin título').slice(0, 80)
     if (row) createIdea(db, { userId: user.id, title: fallbackTitle, summary: null, evidenceIds: [row.id] })
     setSession(db, user.id, chatId, 'inicio', {})
     return {
@@ -157,7 +169,7 @@ async function handleComando(db, user, chatId, input) {
     const texto = lineas.length ? lineas.join('\n') : 'No tenés nada pendiente 🎉'
     return { texto, botones: [], estado: 'inicio' }
   }
-  if (comando.startsWith('/idea')) {
+  if (comando === '/idea' || comando.startsWith('/idea ')) {
     const titulo = comando.slice('/idea'.length).trim() || 'Idea sin título'
     const ideaId = createIdea(db, { userId: user.id, title: titulo, summary: null, evidenceIds: [] })
     setSession(db, user.id, chatId, 'proponiendo_idea', { ideaId })
@@ -409,7 +421,7 @@ async function handleProgramar(db, user, chatId, session, boton, opts) {
 
       createChannelVersion(db, {
         draftId: draft.id, profileChannelId: canal.id, formatCode,
-        textContent: adapt.text, mediaPath, status, scheduledAt,
+        textContent: adapt.text, mediaPath, hashtags: adapt.hashtags, status, scheduledAt,
       })
       resumen.push(`• ${profile.name} → ${canal.code}/${formatCode}${scheduledAt ? ` (📅 ${scheduledAt})` : ' (⏳ a la cola)'}`)
     }

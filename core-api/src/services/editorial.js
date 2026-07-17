@@ -34,11 +34,11 @@ export function setDraftStatus(db, draftId, status) {
   db.prepare('UPDATE drafts SET status = ? WHERE id = ?').run(status, draftId)
 }
 
-export function createChannelVersion(db, { draftId, profileChannelId, formatCode, textContent, mediaPath = null, status = 'pendiente', scheduledAt = null }) {
+export function createChannelVersion(db, { draftId, profileChannelId, formatCode, textContent, mediaPath = null, hashtags = null, status = 'pendiente', scheduledAt = null }) {
   return db.prepare(`
-    INSERT INTO channel_versions (draft_id, profile_channel_id, format_code, text_content, media_path, status, scheduled_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(draftId, profileChannelId, formatCode, textContent, mediaPath, status, scheduledAt).lastInsertRowid
+    INSERT INTO channel_versions (draft_id, profile_channel_id, format_code, text_content, media_path, hashtags, status, scheduled_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(draftId, profileChannelId, formatCode, textContent, mediaPath, hashtags, status, scheduledAt).lastInsertRowid
 }
 
 export function pendingFor(db, userId) {

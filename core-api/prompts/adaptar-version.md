@@ -8,4 +8,4 @@ Reglas por canal: linkedin → hasta 2900 caracteres, tono profesional, 3-5 hash
 instagram → hasta 2000 caracteres, más visual y directo, 5-10 hashtags;
 wa_status → 1-2 frases potentes (va sobre una imagen).
 
-Devolvé SOLO JSON: {"texto": "<el post adaptado>", "hashtags": "<#uno #dos ..."}
+Devolvé SOLO JSON: {"texto": "<el post adaptado>", "hashtags": "<#uno #dos ...>"}

@@ -33,9 +33,9 @@ export async function proponerIdea(evidencias, { fetchImpl } = {}) {
 
 export async function redactarBoceto(profile, idea, evidencias, { fetchImpl } = {}) {
   const sys = prompt('redactar-boceto.md')
-    .replace('__PERFIL__', perfilTexto(profile))
-    .replace('__IDEA__', `${idea.title}${idea.summary ? ` — ${idea.summary}` : ''}`)
-    .replace('__EVIDENCIA__', evidenciaTexto(evidencias))
+    .replace('__PERFIL__', () => perfilTexto(profile))
+    .replace('__IDEA__', () => `${idea.title}${idea.summary ? ` — ${idea.summary}` : ''}`)
+    .replace('__EVIDENCIA__', () => evidenciaTexto(evidencias))
   const { content, raw } = await chat('redactar', [
     { role: 'system', content: sys },
     { role: 'user', content: 'Escribí el post.' },
@@ -53,10 +53,10 @@ export async function refinarBoceto(profile, contenidoActual, feedback, { fetchI
 
 export async function adaptarVersion(profile, contenido, channelCode, formatCode, { fetchImpl } = {}) {
   const sys = prompt('adaptar-version.md')
-    .replace('__PERFIL__', perfilTexto(profile))
-    .replace('__POST__', contenido)
-    .replace('__CANAL__', channelCode)
-    .replace('__FORMATO__', formatCode)
+    .replace('__PERFIL__', () => perfilTexto(profile))
+    .replace('__POST__', () => contenido)
+    .replace('__CANAL__', () => channelCode)
+    .replace('__FORMATO__', () => formatCode)
   const { content, raw } = await chat('redactar', [
     { role: 'system', content: sys },
     { role: 'user', content: 'Adaptá el post.' },
