@@ -111,6 +111,34 @@ const httpCoreApi = (name, { url, jsonBody }, position) => ({
   },
 })
 
+// HTTP hacia core-api SIN header de identidad — únicamente para "Redimir invitacion":
+// es la sola ruta pública del sistema, el remitente todavía no existe en `users` así
+// que no hay chat_id que autenticar. Mismos flags de resiliencia que httpCoreApi
+// (fullResponse, neverError, onError continue) pero timeout corto: es una consulta
+// local a SQLite, no un pipeline de IA.
+const httpRedimirInvitacion = (name, position) => ({
+  name,
+  type: 'n8n-nodes-base.httpRequest',
+  typeVersion: 4.2,
+  position,
+  onError: 'continueRegularOutput',
+  parameters: {
+    method: 'POST',
+    url: '={{ $env.CORE_API_URL }}/api/invitations/redeem',
+    sendHeaders: true,
+    headerParameters: { parameters: [
+      { name: 'Content-Type', value: 'application/json' },
+    ] },
+    sendBody: true,
+    specifyBody: 'json',
+    jsonBody: '={{ JSON.stringify({code: $json.code, chatId: $json.chatId, nombre: $json.nombre}) }}',
+    options: {
+      timeout: 30000,
+      response: { response: { fullResponse: true, neverError: true } },
+    },
+  },
+})
+
 const nodes = [
   {
     name: 'Webhook Telegram',
@@ -129,7 +157,7 @@ const nodes = [
     parameters: { respondWith: 'json', responseBody: '={{ JSON.stringify({ok: true}) }}', options: {} },
   },
   codeNode('Preparar turno', '01-preparar-turno.js', [360, 400]),
-  switchNode('Switch camino', ['evidencia', 'turno', 'ayuda'], [560, 400]),
+  switchNode('Switch camino', ['evidencia', 'turno', 'ayuda', 'unirme'], [560, 400]),
 
   // camino "evidencia"
   httpCoreApi('Persistir evidencia', {
@@ -144,6 +172,10 @@ const nodes = [
     url: '={{ $env.CORE_API_URL }}/api/agent/next-turn',
     jsonBody: '={{ JSON.stringify({input: $json.input}) }}',
   }, [780, 400]),
+
+  // camino "unirme": la única rama que llega sin pasar por autenticación
+  httpRedimirInvitacion('Redimir invitacion', [780, 580]),
+  codeNode('Armar unirme', '04-armar-unirme.js', [1000, 580]),
 
   // confluencia: turno / ayuda / respuestaDirecta de evidencia
   codeNode('Armar respuesta', '02-armar-respuesta.js', [1440, 400]),
@@ -185,6 +217,7 @@ const connections = connect([
     { ...main('Persistir evidencia'), _out: 0 },  // evidencia
     { ...main('Turno del agente'), _out: 1 },     // turno
     { ...main('Armar respuesta'), _out: 2 },      // ayuda
+    { ...main('Redimir invitacion'), _out: 3 },   // unirme
   ]],
   ['Persistir evidencia', [main('Armar turno evidencia')]],
   ['Armar turno evidencia', [main('¿Turno directo?')]],
@@ -193,6 +226,8 @@ const connections = connect([
     { ...main('Armar respuesta'), _out: 1 },   // false: ya hay respuestaDirecta -> arma y listo
   ]],
   ['Turno del agente', [main('Armar respuesta')]],
+  ['Redimir invitacion', [main('Armar unirme')]],
+  ['Armar unirme', [main('¿Responder?')]],
   ['Armar respuesta', [main('¿Responder?')]],
   ['¿Responder?', [
     { ...main('Enviar por Telegram'), _out: 0 },  // true

@@ -16,7 +16,15 @@ if (b.tipo === 'comando' && b.comando === '/start') {
 }
 
 if (b.tipo === 'comando') {
-  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'comando', comando: b.texto || b.comando } } }]
+  const comandoCompleto = b.texto || b.comando || ''
+  // /unirme <código>: único comando que NO pasa por la autenticación normal — el
+  // remitente todavía no existe en `users`. Se resuelve contra la ruta pública
+  // POST /api/invitations/redeem (ver "Redimir invitacion" en build-workflow.mjs).
+  if (comandoCompleto === '/unirme' || comandoCompleto.startsWith('/unirme ')) {
+    const code = comandoCompleto.slice('/unirme'.length).trim()
+    return [{ json: { chatId: b.chatId, camino: 'unirme', nombre: b.nombre || null, code } }]
+  }
+  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'comando', comando: comandoCompleto } } }]
 }
 
 if (b.tipo === 'texto') {

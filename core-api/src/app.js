@@ -3,6 +3,7 @@ import { authMiddleware } from './auth.js'
 import { profilesRouter } from './routes/profiles.js'
 import { evidenceRouter } from './routes/evidence.js'
 import { agentRouter } from './routes/agent.js'
+import { invitationsRouter } from './routes/invitations.js'
 
 export function createApp(db, { aiFetch } = {}) {
   const app = express()
@@ -10,6 +11,10 @@ export function createApp(db, { aiFetch } = {}) {
   app.get('/health', (_req, res) => res.json({ ok: true }))
 
   if (db) {
+    // ÚNICA ruta pública del sistema (sin authMiddleware) — montada ANTES del router
+    // autenticado para que la petición nunca llegue a authMiddleware. Ver invitations.js.
+    app.use('/api/invitations', invitationsRouter(db))
+
     const api = express.Router()
     api.use(authMiddleware(db))
     api.get('/me', (req, res) => {

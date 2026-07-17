@@ -9,7 +9,8 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const NODOS_ESPERADOS = [
   'Webhook Telegram', 'ACK', 'Preparar turno', 'Switch camino',
   'Persistir evidencia', 'Armar turno evidencia', '¿Turno directo?',
-  'Turno del agente', 'Armar respuesta', '¿Responder?', 'Enviar por Telegram',
+  'Turno del agente', 'Redimir invitacion', 'Armar unirme',
+  'Armar respuesta', '¿Responder?', 'Enviar por Telegram',
 ]
 
 describe('workflow de n8n', () => {
@@ -41,12 +42,12 @@ describe('workflow de n8n', () => {
     const armarRespuesta = wf.nodes.find((n) => n.name === 'Armar respuesta')
     expect(armarRespuesta.parameters.jsCode).toContain('silencio administrativo')
 
-    // Switch camino: 3 salidas por $json.camino (evidencia / turno / ayuda)
+    // Switch camino: 4 salidas por $json.camino (evidencia / turno / ayuda / unirme)
     const switchCamino = wf.nodes.find((n) => n.name === 'Switch camino')
     expect(switchCamino.type).toBe('n8n-nodes-base.switch')
     const reglas = switchCamino.parameters.rules.values
     const caminos = reglas.map((r) => r.conditions.conditions[0].rightValue)
-    expect(caminos).toEqual(['evidencia', 'turno', 'ayuda'])
+    expect(caminos).toEqual(['evidencia', 'turno', 'ayuda', 'unirme'])
     for (const regla of reglas) {
       expect(regla.conditions.conditions[0].leftValue).toBe('={{ $json.camino }}')
     }
@@ -56,6 +57,7 @@ describe('workflow de n8n', () => {
     expect(conexionesSwitch[0].map((d) => d.node)).toContain('Persistir evidencia')
     expect(conexionesSwitch[1].map((d) => d.node)).toContain('Turno del agente')
     expect(conexionesSwitch[2].map((d) => d.node)).toContain('Armar respuesta')
+    expect(conexionesSwitch[3].map((d) => d.node)).toContain('Redimir invitacion')
 
     // Persistir evidencia y Turno del agente: header de identidad, fullResponse, neverError, onError continue
     for (const nombre of ['Persistir evidencia', 'Turno del agente']) {
@@ -71,6 +73,38 @@ describe('workflow de n8n', () => {
     const turnoDelAgente = wf.nodes.find((n) => n.name === 'Turno del agente')
     expect(turnoDelAgente.parameters.url).toBe('={{ $env.CORE_API_URL }}/api/agent/next-turn')
     expect(turnoDelAgente.parameters.jsonBody).toBe('={{ JSON.stringify({input: $json.input}) }}')
+
+    // SEGURIDAD: "Redimir invitacion" es la ÚNICA llamada HTTP de todo el workflow sin
+    // header de identidad — a propósito, es la ruta pública. Debe seguir teniendo los
+    // mismos flags de resiliencia que las demás llamadas a core-api (fullResponse,
+    // neverError, onError continue), pero con timeout corto (consulta local, no IA).
+    const redimirInvitacion = wf.nodes.find((n) => n.name === 'Redimir invitacion')
+    expect(redimirInvitacion.type).toBe('n8n-nodes-base.httpRequest')
+    expect(redimirInvitacion.parameters.url).toBe('={{ $env.CORE_API_URL }}/api/invitations/redeem')
+    expect(
+      JSON.stringify(redimirInvitacion.parameters.headerParameters),
+      'Redimir invitacion NO debe mandar X-Telegram-Chat-Id — es la ruta pública sin auth'
+    ).not.toContain('X-Telegram-Chat-Id')
+    expect(redimirInvitacion.parameters.jsonBody).toBe(
+      '={{ JSON.stringify({code: $json.code, chatId: $json.chatId, nombre: $json.nombre}) }}'
+    )
+    expect(redimirInvitacion.parameters.options.response.response.fullResponse).toBe(true)
+    expect(redimirInvitacion.parameters.options.response.response.neverError).toBe(true)
+    expect(redimirInvitacion.onError).toBe('continueRegularOutput')
+    expect(redimirInvitacion.parameters.options.timeout).toBe(30000)
+
+    // todas las demás llamadas HTTP a core-api SÍ deben mandar el header de identidad
+    // (confirma que "Redimir invitacion" es la excepción deliberada, no un olvido general)
+    for (const nombre of ['Persistir evidencia', 'Turno del agente']) {
+      const nodo = wf.nodes.find((n) => n.name === nombre)
+      expect(JSON.stringify(nodo.parameters.headerParameters)).toContain('X-Telegram-Chat-Id')
+    }
+
+    // Redimir invitacion -> Armar unirme -> converge directo en ¿Responder? (no pasa por Armar respuesta)
+    expect(wf.connections['Redimir invitacion'].main[0].map((d) => d.node)).toContain('Armar unirme')
+    expect(wf.connections['Armar unirme'].main[0].map((d) => d.node)).toContain('¿Responder?')
+    const armarUnirme = wf.nodes.find((n) => n.name === 'Armar unirme')
+    expect(armarUnirme.parameters.jsCode).toContain('responder')
 
     // ¿Turno directo?: sin respuestaDirecta -> Turno del agente; con respuestaDirecta -> Armar respuesta
     const turnoDirecto = wf.nodes.find((n) => n.name === '¿Turno directo?')

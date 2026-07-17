@@ -34,6 +34,68 @@ describe('nodo 01: preparar turno', () => {
     })
     expect(out.json.input.comando).toBe('/idea Lanzar newsletter')
   })
+
+  it('/unirme <código> → camino unirme, código extraído sin espacios extra', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'comando', comando: '/unirme', texto: '/unirme  ABC123XY  ', nombre: 'Nueva Persona' } },
+    })
+    expect(out.json).toEqual({ chatId: '9', camino: 'unirme', nombre: 'Nueva Persona', code: 'ABC123XY' })
+  })
+
+  it('/unirme sin código → camino unirme con code vacío (la ruta pública lo rechaza)', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'comando', comando: '/unirme', texto: '/unirme' } },
+    })
+    expect(out.json.camino).toBe('unirme')
+    expect(out.json.code).toBe('')
+  })
+
+  it('/unirme sin nombre en el body → nombre null', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'comando', comando: '/unirme', texto: '/unirme ABC123XY' } },
+    })
+    expect(out.json.nombre).toBeNull()
+  })
+
+  it('comando que empieza con /unir pero no es /unirme sigue el camino turno normal', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'comando', comando: '/unirmeadamas', texto: '/unirmeadamas' } },
+    })
+    expect(out.json.camino).toBe('turno')
+  })
+})
+
+describe('nodo 04: armar unirme', () => {
+  const nodes = { 'Preparar turno': { chatId: '9' } }
+
+  it('{ok:true,texto} → responder:true con ese texto exacto', () => {
+    const [out] = runCodeNode('04-armar-unirme.js', {
+      json: { statusCode: 200, body: { ok: true, texto: '✅ Listo, ya formás parte de SkyTrace como editor.' } },
+      nodes,
+    })
+    expect(out.json).toEqual({ responder: true, chatId: '9', texto: '✅ Listo, ya formás parte de SkyTrace como editor.' })
+  })
+
+  it('{ok:false,texto} → responder:true con ese texto exacto (la ruta pública siempre responde 200)', () => {
+    const [out] = runCodeNode('04-armar-unirme.js', {
+      json: { statusCode: 200, body: { ok: false, texto: 'Ese código no es válido o ya venció.' } },
+      nodes,
+    })
+    expect(out.json).toEqual({ responder: true, chatId: '9', texto: 'Ese código no es válido o ya venció.' })
+  })
+
+  it('error de red → fallback amable, no revienta el nodo', () => {
+    const [out] = runCodeNode('04-armar-unirme.js', { json: { error: 'ECONNREFUSED' }, nodes })
+    expect(out.json.responder).toBe(true)
+    expect(out.json.chatId).toBe('9')
+    expect(out.json.texto).toMatch(/no pude validar/i)
+  })
+
+  it('status inesperado sin body.texto → fallback amable', () => {
+    const [out] = runCodeNode('04-armar-unirme.js', { json: { statusCode: 500, body: {} }, nodes })
+    expect(out.json.responder).toBe(true)
+    expect(out.json.texto).toMatch(/no pude validar/i)
+  })
 })
 
 describe('nodo 03: armar turno evidencia', () => {
