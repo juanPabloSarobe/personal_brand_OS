@@ -11,6 +11,14 @@ function isValidBase64(s) {
   return typeof s === 'string' && s.length > 0 && s.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s)
 }
 
+function entitiesFor(db, evidenceId) {
+  return db.prepare(`
+    SELECT e.kind, e.name FROM entity_mentions m
+    JOIN entities e ON e.id = m.entity_id
+    WHERE m.evidence_id = ? ORDER BY e.id
+  `).all(evidenceId)
+}
+
 export function evidenceRouter(db) {
   const r = Router()
 
@@ -49,7 +57,18 @@ export function evidenceRouter(db) {
       }
       const id = info.lastInsertRowid
       const result = await processEvidence(db, id, { fetchImpl: req.app.locals.aiFetch })
-      res.status(201).json({ id, folio: `E-${String(id).padStart(4, '0')}`, processed: result.processed })
+      const fila = db.prepare('SELECT transcription, vision_description FROM evidence WHERE id = ?').get(id)
+      const entities = entitiesFor(db, id)
+      res.status(201).json({
+        id,
+        folio: `E-${String(id).padStart(4, '0')}`,
+        processed: result.processed,
+        detalle: {
+          transcription: fila.transcription,
+          vision_description: fila.vision_description,
+          entities,
+        },
+      })
     } catch (err) {
       next(err)
     }
@@ -67,11 +86,7 @@ export function evidenceRouter(db) {
     const row = db.prepare('SELECT * FROM evidence WHERE id = ?').get(Number(req.params.id))
     if (!row) return res.status(404).json({ error: 'evidencia inexistente' })
     if (row.user_id !== req.user.id) return res.status(403).json({ error: 'sin acceso a la evidencia' })
-    const entities = db.prepare(`
-      SELECT e.kind, e.name FROM entity_mentions m
-      JOIN entities e ON e.id = m.entity_id
-      WHERE m.evidence_id = ? ORDER BY e.id
-    `).all(row.id)
+    const entities = entitiesFor(db, row.id)
     res.json({ ...row, entities })
   })
 
