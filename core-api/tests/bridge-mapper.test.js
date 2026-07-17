@@ -7,23 +7,23 @@ const chat = { id: 5551234 }
 describe('mapper del puente', () => {
   it('texto plano', () => {
     expect(mapUpdate({ ...base, message: { chat, text: 'probamos el sensor' } }))
-      .toEqual({ chatId: '5551234', tipo: 'texto', texto: 'probamos el sensor' })
+      .toEqual({ chatId: '5551234', tipo: 'texto', texto: 'probamos el sensor', nombre: null })
   })
 
   it('comando', () => {
     expect(mapUpdate({ ...base, message: { chat, text: '/start hola' } }))
-      .toEqual({ chatId: '5551234', tipo: 'comando', comando: '/start', texto: '/start hola' })
+      .toEqual({ chatId: '5551234', tipo: 'comando', comando: '/start', texto: '/start hola', nombre: null })
   })
 
   it('nota de voz → audio', () => {
     expect(mapUpdate({ ...base, message: { chat, voice: { file_id: 'F1' } } }))
-      .toEqual({ chatId: '5551234', tipo: 'audio', fileId: 'F1', filename: 'nota-de-voz.ogg', caption: null })
+      .toEqual({ chatId: '5551234', tipo: 'audio', fileId: 'F1', filename: 'nota-de-voz.ogg', caption: null, nombre: null })
   })
 
   it('foto: toma la resolución más alta y conserva caption', () => {
     const message = { chat, caption: 'banco de pruebas', photo: [{ file_id: 'chica' }, { file_id: 'grande' }] }
     expect(mapUpdate({ ...base, message }))
-      .toEqual({ chatId: '5551234', tipo: 'foto', fileId: 'grande', filename: 'foto.jpg', caption: 'banco de pruebas' })
+      .toEqual({ chatId: '5551234', tipo: 'foto', fileId: 'grande', filename: 'foto.jpg', caption: 'banco de pruebas', nombre: null })
   })
 
   it('video con nombre', () => {
@@ -40,5 +40,11 @@ describe('mapper del puente', () => {
   it('updates sin mensaje o no soportados → null', () => {
     expect(mapUpdate({ ...base })).toBeNull()
     expect(mapUpdate({ ...base, message: { chat, sticker: { file_id: 'S1' } } })).toBeNull()
+  })
+
+  it('captura nombre del remitente desde msg.from.first_name', () => {
+    const from = { id: 123, first_name: 'Juan' }
+    expect(mapUpdate({ ...base, message: { chat, from, text: 'hola mundo' } }))
+      .toEqual({ chatId: '5551234', tipo: 'texto', texto: 'hola mundo', nombre: 'Juan' })
   })
 })
