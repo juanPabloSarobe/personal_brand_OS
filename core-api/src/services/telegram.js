@@ -24,7 +24,8 @@ export async function sendMessage(chatId, text, options = {}) {
       body: JSON.stringify({
         chat_id: chatId,
         text: text
-      })
+      }),
+      signal: AbortSignal.timeout(30000)
     })
 
     if (!response.ok) {
@@ -72,7 +73,8 @@ export async function sendPhotoFile(chatId, filePath, caption, options = {}) {
 
     const response = await fetchImpl(url, {
       method: 'POST',
-      body: formData
+      body: formData,
+      signal: AbortSignal.timeout(30000)
     })
 
     if (!response.ok) {

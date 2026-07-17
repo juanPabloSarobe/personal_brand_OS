@@ -48,6 +48,7 @@ async function ugcPost({ fetchImpl, accessToken, personUrn, texto, media }) {
       'X-Restli-Protocol-Version': '2.0.0',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
   })
 
   if (!res.ok) return clasificarError(res.status)
@@ -81,6 +82,7 @@ async function registrarYSubirImagen({ fetchImpl, accessToken, personUrn, mediaP
       'X-Restli-Protocol-Version': '2.0.0',
     },
     body: JSON.stringify(registerBody),
+    signal: AbortSignal.timeout(30000),
   })
 
   if (!registerRes.ok) return { error: clasificarError(registerRes.status) }
@@ -94,6 +96,7 @@ async function registrarYSubirImagen({ fetchImpl, accessToken, personUrn, mediaP
     method: 'PUT',
     headers: { Authorization: `Bearer ${accessToken}` },
     body: fileBuffer,
+    signal: AbortSignal.timeout(30000),
   })
 
   if (!putRes.ok) return { error: clasificarError(putRes.status) }

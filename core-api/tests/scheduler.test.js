@@ -17,7 +17,8 @@ function buildFixture(db, {
   scheduledAtExpr = "datetime('now', '-2 minutes')",
 } = {}) {
   const userId = db.prepare('SELECT id FROM users WHERE telegram_chat_id = ?').get(ADMIN_CHAT).id
-  const profileId = db.prepare("INSERT INTO brand_profiles (name, slug) VALUES ('JP','jp')").run().lastInsertRowid
+  const slug = 'jp-' + Math.random().toString(36).slice(2)
+  const profileId = db.prepare("INSERT INTO brand_profiles (name, slug) VALUES ('JP', ?)").run(slug).lastInsertRowid
   db.prepare("INSERT INTO user_profile_access VALUES (?, ?, 'owner')").run(userId, profileId)
 
   const chId = db.prepare('SELECT id FROM channels WHERE code = ?').get(channelCode).id
@@ -251,6 +252,152 @@ describe('scheduler: reintentos y degradación', () => {
     expect(fetchCalled).toBe(false)
     const row = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(versionId)
     expect(row.status).toBe('aprobada')
+  })
+
+  it('degradación con Telegram caído aplica backoff creciente, no reintenta cada minuto', async () => {
+    const { db } = makeTestApp()
+    const { versionId } = buildFixture(db, { channelCode: 'linkedin' })
+
+    let linkedinCalls = 0
+    const fetchImpl = async (url) => {
+      if (url.includes('api.linkedin.com')) {
+        linkedinCalls++
+        return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'boom' }
+      }
+      if (url.includes('api.telegram.org')) {
+        return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'telegram caído' }
+      }
+      throw new Error('fetch inesperado: ' + url)
+    }
+
+    // Attempt 1: intento real contra linkedin (falla, retryable). El canal
+    // real se llama exactamente esta vez en todo el test.
+    const r1 = await tick(db, { fetchImpl })
+    expect(r1).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+    expect(linkedinCalls).toBe(1)
+
+    // Pre-sembramos los intentos 2 y 3 (fallidos) en el pasado para que el
+    // próximo tick llegue con 3 intentos fallidos y degrade de inmediato.
+    logAttemptAt(db, versionId, 2, false, "datetime('now', '-15 minutes')")
+    logAttemptAt(db, versionId, 3, false, "datetime('now', '-10 minutes')")
+
+    // Tick: degrada (attempt 4). El envío manual también falla (Telegram
+    // caído), así que queda 'programada' pero YA marcada degrade_decidido.
+    const r2 = await tick(db, { fetchImpl })
+    expect(r2).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+    expect(linkedinCalls).toBe(1) // no se volvió a llamar al canal real
+
+    let row = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(versionId)
+    expect(row.status).toBe('programada')
+
+    let logs = db.prepare('SELECT * FROM publish_log WHERE channel_version_id = ? ORDER BY id').all(versionId)
+    expect(logs).toHaveLength(4)
+    expect(logs[3].attempt).toBe(4)
+    expect(JSON.parse(logs[3].response_json).degrade_decidido).toBe(true)
+
+    // Tick inmediatamente después (mismo minuto real): backoff de degradación
+    // (1 min tras el primer intento de degradación) NO cumplido -> se saltea,
+    // no llama a Telegram de nuevo, no agrega fila nueva.
+    const r3 = await tick(db, { fetchImpl })
+    expect(r3).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+    expect(linkedinCalls).toBe(1)
+    logs = db.prepare('SELECT * FROM publish_log WHERE channel_version_id = ? ORDER BY id').all(versionId)
+    expect(logs).toHaveLength(4)
+
+    // Simulamos que pasaron 15+ minutos desde el último intento de
+    // degradación: ahora el backoff (con tope 15min) está sobradamente
+    // cumplido y debe reintentar la entrega manual (attempt 5).
+    db.prepare(`UPDATE publish_log SET created_at = datetime('now', '-16 minutes') WHERE id = ?`)
+      .run(logs[3].id)
+
+    const r4 = await tick(db, { fetchImpl })
+    expect(r4).toEqual({ procesadas: 1, publicadas: 0, degradadas: 0, reintentos_pendientes: 1 })
+    logs = db.prepare('SELECT * FROM publish_log WHERE channel_version_id = ? ORDER BY id').all(versionId)
+    expect(logs).toHaveLength(5)
+    expect(logs[4].attempt).toBe(5)
+    expect(JSON.parse(logs[4].response_json).degrade_decidido).toBe(true)
+
+    // A través de todo el test, el canal real (linkedin) se llamó como
+    // mucho una vez: degrade_decidido evita volver a llamarlo.
+    expect(linkedinCalls).toBe(1)
+  })
+
+  it('una version que lanza no aborta el resto del lote', async () => {
+    const { db } = makeTestApp()
+    const bad = buildFixture(db, { channelCode: 'linkedin' })
+    const good = buildFixture(db, { channelCode: 'linkedin' })
+
+    // Forzamos que procesarVersion(bad) lance: borramos el draft que
+    // referencia, dejando el channel_version con un draft_id colgante.
+    // contextoDe() explota con TypeError al leer `draft.idea_id` de
+    // `undefined` — exactamente el tipo de fila corrupta que no debe
+    // abortar el resto del lote.
+    db.pragma('foreign_keys = OFF')
+    db.prepare('DELETE FROM drafts WHERE id = ?').run(bad.draftId)
+    db.pragma('foreign_keys = ON')
+
+    const fetchImpl = async (url, opts) => {
+      if (url.includes('api.linkedin.com')) {
+        return {
+          ok: true, status: 201,
+          headers: { get: (k) => (k.toLowerCase() === 'x-restli-id' ? 'urn:li:share:ok' : null) },
+          json: async () => ({}),
+        }
+      }
+      if (url.includes('api.telegram.org')) return { ok: true, json: async () => ({ ok: true }) }
+      throw new Error('fetch inesperado: ' + url)
+    }
+
+    const resumen = await tick(db, { fetchImpl })
+
+    expect(resumen).toEqual({ procesadas: 2, publicadas: 1, degradadas: 0, reintentos_pendientes: 1 })
+
+    const badRow = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(bad.versionId)
+    expect(badRow.status).toBe('programada') // no se tocó, se reintentará el próximo tick
+
+    const goodRow = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(good.versionId)
+    expect(goodRow.status).toBe('publicada')
+  })
+
+  it('tick() concurrente se serializa, no publica dos veces', async () => {
+    const { db } = makeTestApp()
+    const { versionId } = buildFixture(db, { channelCode: 'linkedin' })
+
+    let publishCalls = 0
+    let releaseFn
+    const release = new Promise((resolve) => { releaseFn = resolve })
+
+    const fetchImpl = async (url) => {
+      if (url.includes('api.linkedin.com')) {
+        publishCalls++
+        await release
+        return {
+          ok: true, status: 201,
+          headers: { get: (k) => (k.toLowerCase() === 'x-restli-id' ? 'urn:li:share:concurrente' : null) },
+          json: async () => ({}),
+        }
+      }
+      if (url.includes('api.telegram.org')) return { ok: true, json: async () => ({ ok: true }) }
+      throw new Error('fetch inesperado: ' + url)
+    }
+
+    // p1 arranca y queda colgado esperando `release` dentro del fetch de
+    // linkedin -> el mutex tickEnProgreso ya quedó en true de forma
+    // síncrona antes de que esta línea siguiente se ejecute.
+    const p1 = tick(db, { fetchImpl })
+
+    // p2 debe detectar el mutex tomado y volver de inmediato con saltado:true,
+    // sin esperar a que se libere `release`.
+    const r2 = await tick(db, { fetchImpl })
+    expect(r2).toEqual({ procesadas: 0, publicadas: 0, degradadas: 0, reintentos_pendientes: 0, saltado: true })
+
+    releaseFn()
+    const r1 = await p1
+    expect(r1).toEqual({ procesadas: 1, publicadas: 1, degradadas: 0, reintentos_pendientes: 0 })
+
+    expect(publishCalls).toBe(1) // nunca se publicó dos veces
+    const row = db.prepare('SELECT * FROM channel_versions WHERE id = ?').get(versionId)
+    expect(row.status).toBe('publicada')
   })
 })
 

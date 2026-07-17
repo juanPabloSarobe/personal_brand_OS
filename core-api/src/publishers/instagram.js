@@ -67,6 +67,7 @@ export async function publicarInstagram(ctx, deps = {}) {
     const mediaRes = await fetchImpl(`${BASE}/${igUserId}/media`, {
       method: 'POST',
       body: mediaParams,
+      signal: AbortSignal.timeout(30000),
     })
     const mediaBody = await leerJson(mediaRes)
     if (!mediaRes.ok) return clasificarError(mediaRes.status, mediaBody)
@@ -79,6 +80,7 @@ export async function publicarInstagram(ctx, deps = {}) {
     const publishRes = await fetchImpl(`${BASE}/${igUserId}/media_publish`, {
       method: 'POST',
       body: publishParams,
+      signal: AbortSignal.timeout(30000),
     })
     const publishBody = await leerJson(publishRes)
     if (!publishRes.ok) return clasificarError(publishRes.status, publishBody)
@@ -87,7 +89,8 @@ export async function publicarInstagram(ctx, deps = {}) {
     let url = FALLBACK_URL
     try {
       const permalinkRes = await fetchImpl(
-        `${BASE}/${mediaId}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`
+        `${BASE}/${mediaId}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`,
+        { signal: AbortSignal.timeout(30000) }
       )
       if (permalinkRes.ok) {
         const permalinkBody = await leerJson(permalinkRes)
