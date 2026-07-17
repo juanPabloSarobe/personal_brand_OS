@@ -1,9 +1,11 @@
 import { decryptJson } from '../crypto.js'
 import { publicarManual } from './manual.js'
+import { publicarLinkedin } from './linkedin.js'
 
 /** Registry de módulos publicadores por `channels.publisher_module`. */
 const registry = {
   manual: publicarManual,
+  linkedin: publicarLinkedin,
 }
 
 function esDryRun(deps) {
