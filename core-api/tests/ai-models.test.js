@@ -20,4 +20,9 @@ describe('router de modelos', () => {
   it('tarea desconocida lanza error', () => {
     expect(() => routeFor('adivinar_futuro')).toThrow(/desconocida/)
   })
+
+  it('AI_ROUTES_JSON inválido se ignora sin romper', () => {
+    process.env.AI_ROUTES_JSON = '{esto no es json'
+    expect(routeFor('redactar')).toEqual({ provider: 'groq', model: 'llama-3.3-70b-versatile' })
+  })
 })
