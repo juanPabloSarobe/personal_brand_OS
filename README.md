@@ -157,6 +157,18 @@ Todo lo que importa vive en el volumen Docker `pbos_data` (la base SQLite +
 los archivos de media). `scripts/backup.sh` lo respalda cifrado, sin necesidad
 de parar los contenedores.
 
+> **Si ya corriste `docker compose up` antes de que se fijara el nombre del
+> volumen** (`name: pbos_data` en `docker-compose.yml`): Docker Compose puede
+> haber creado el volumen con el nombre autogenerado viejo (algo como
+> `personal_brand_os_pbos_data`), que es donde vive tus datos reales. Migralo
+> al volumen `pbos_data` antes de confiar en los backups, o vas a estar
+> respaldando (o restaurando) un volumen `pbos_data` vacío:
+>
+> ```bash
+> docker run --rm -v personal_brand_os_pbos_data:/from -v pbos_data:/to \
+>   alpine sh -c "cp -a /from/. /to/"
+> ```
+
 ### Configurar
 
 ```bash

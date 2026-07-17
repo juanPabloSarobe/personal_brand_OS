@@ -3,6 +3,8 @@
 #
 # Uso:
 #   ./scripts/restore.sh backups/pbos-2026-07-17.tar.gz.enc
+#   ./scripts/restore.sh --force backups/pbos-2026-07-17.tar.gz.enc   # sin confirmación (uso no interactivo)
+#   ./scripts/restore.sh -y backups/pbos-2026-07-17.tar.gz.enc        # idem, forma corta
 #
 # Qué hace:
 #   1. Descifra el archivo (pide BACKUP_PASSPHRASE de .env, misma passphrase
@@ -24,12 +26,25 @@ cd "$REPO_DIR"
 ENV_FILE="$REPO_DIR/.env"
 VOLUME_NAME="pbos_data"
 
-if [ $# -ne 1 ]; then
-  echo "Uso: $0 <archivo-backup.tar.gz.enc>" >&2
+FORCE=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --force|-y)
+      FORCE=1
+      ;;
+    *)
+      ARGS+=("$arg")
+      ;;
+  esac
+done
+
+if [ "${#ARGS[@]}" -ne 1 ]; then
+  echo "Uso: $0 [--force|-y] <archivo-backup.tar.gz.enc>" >&2
   exit 1
 fi
 
-ENC_FILE="$1"
+ENC_FILE="${ARGS[0]}"
 
 if [ ! -f "$ENC_FILE" ]; then
   echo "❌ No existe el archivo: $ENC_FILE" >&2
@@ -56,6 +71,17 @@ BACKUP_PASSPHRASE="$BACKUP_PASSPHRASE" openssl enc -d -aes-256-cbc -pbkdf2 \
   -pass env:BACKUP_PASSPHRASE \
   -in "$ENC_FILE" \
   -out "$TMP_TAR"
+
+if [ "$FORCE" -ne 1 ]; then
+  echo "⚠️  Esto va a BORRAR todos los datos actuales del volumen Docker '$VOLUME_NAME'" >&2
+  echo "   y reemplazarlos por el contenido de: $ENC_FILE" >&2
+  echo "   No hay vuelta atrás salvo que tengas otro backup del estado previo." >&2
+  read -r -p "Esto reemplaza TODOS los datos actuales en $VOLUME_NAME con el contenido de $ENC_FILE. Escribí 'si' para continuar: " confirm
+  if [ "$confirm" != "si" ]; then
+    echo "❌ Cancelado — no se escribió 'si'. No se tocó nada." >&2
+    exit 1
+  fi
+fi
 
 echo "⏸️  Parando los contenedores (docker compose down) ..."
 docker compose down

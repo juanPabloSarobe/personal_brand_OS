@@ -47,6 +47,13 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
+# Si el volumen no existe, `docker run -v` lo crea vacío en silencio y el
+# backup "funciona" sobre nada. Falla ruidosamente antes de eso.
+docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1 || {
+  echo "❌ El volumen $VOLUME_NAME no existe. ¿Corriste docker compose up?" >&2
+  exit 1
+}
+
 echo "📦 Volcando el volumen '$VOLUME_NAME' a $BACKUP_DIR/$TAR_NAME ..."
 docker run --rm \
   -v "${VOLUME_NAME}:/data" \
@@ -60,6 +67,17 @@ BACKUP_PASSPHRASE="$BACKUP_PASSPHRASE" openssl enc -aes-256-cbc -pbkdf2 -salt \
   -out "$BACKUP_DIR/$ENC_NAME"
 
 rm -f "$BACKUP_DIR/$TAR_NAME"
+
+# Sanity check: un backup cifrado sospechosamente chico probablemente viene
+# de un volumen vacío o de un fallo silencioso a mitad de camino. Mejor
+# fallar ruidosamente acá que "tener éxito" con un backup inútil.
+MIN_BYTES=1024
+ENC_FILE="$BACKUP_DIR/$ENC_NAME"
+ENC_SIZE="$(wc -c <"$ENC_FILE" | tr -d ' ')"
+if [ ! -s "$ENC_FILE" ] || [ "$ENC_SIZE" -lt "$MIN_BYTES" ]; then
+  echo "❌ El backup cifrado ($ENC_FILE) pesa $ENC_SIZE bytes — sospechosamente chico (mínimo esperado: $MIN_BYTES). ¿El volumen estaba vacío?" >&2
+  exit 1
+fi
 
 echo "🧹 Borrando backups cifrados de más de $RETENTION_DAYS días ..."
 find "$BACKUP_DIR" -maxdepth 1 -name 'pbos-*.tar.gz.enc' -mtime "+${RETENTION_DAYS}" -print -delete
