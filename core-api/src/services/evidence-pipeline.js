@@ -7,7 +7,12 @@ import { recordMentions } from './entities-store.js'
 const MIMES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' }
 
 export async function processEvidence(db, evidenceId, { fetchImpl } = {}) {
-  const ev = db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidenceId)
+  let ev
+  try {
+    ev = db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidenceId)
+  } catch (err) {
+    return { processed: false, reason: 'id inválido: ' + String(err) }
+  }
   if (!ev) return { processed: false, reason: 'inexistente' }
   if (!process.env.GROQ_API_KEY) return { processed: false, reason: 'sin GROQ_API_KEY' }
 
@@ -41,8 +46,12 @@ export async function processEvidence(db, evidenceId, { fetchImpl } = {}) {
     db.prepare('UPDATE evidence SET raw_llm_json = ? WHERE id = ?').run(JSON.stringify(raws), ev.id)
     return { processed: true }
   } catch (err) {
-    db.prepare('UPDATE evidence SET raw_llm_json = ? WHERE id = ?')
-      .run(JSON.stringify({ ...raws, error: String(err) }), ev.id)
+    try {
+      db.prepare('UPDATE evidence SET raw_llm_json = ? WHERE id = ?')
+        .run(JSON.stringify({ ...raws, error: String(err) }), ev.id)
+    } catch (updateErr) {
+      // best-effort audit: swallow update error to preserve NEVER-throws contract
+    }
     return { processed: false, reason: String(err) }
   }
 }

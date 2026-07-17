@@ -86,4 +86,11 @@ describe('pipeline de evidencia', () => {
     const res = await processEvidence(db, 9999)
     expect(res).toEqual({ processed: false, reason: 'inexistente' })
   })
+
+  it('evidenceId inválido no lanza (regla de oro)', async () => {
+    const { db } = makeTestApp()
+    const res = await processEvidence(db, { malo: true })
+    expect(res.processed).toBe(false)
+    // the fact that we reach here and res is defined means the function did not throw
+  })
 })
