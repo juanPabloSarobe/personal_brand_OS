@@ -170,4 +170,31 @@ describe('/conectar', () => {
 
     for (const t of textos) expect(t).not.toContain(TOKEN)
   })
+
+  it('mientras el flujo está a mitad de camino, la fila cruda de sessions no contiene el token en claro', async () => {
+    const { db } = makeTestApp()
+    const admin = db.prepare("SELECT * FROM users WHERE telegram_chat_id='111'").get()
+    crearPerfil(db, admin.id, 'SkyTrace')
+    const TOKEN = 'mitad-camino-secreto-no-debe-quedar-en-claro-Q7W'
+
+    // /conectar -> elige LinkedIn -> pega el access_token, pero NUNCA manda el person_urn:
+    // el flujo queda abandonado a mitad de camino, con el token ya en el borrador.
+    await nextTurn(db, admin, '111', { clase: 'comando', comando: '/conectar' })
+    await nextTurn(db, admin, '111', { clase: 'boton', boton: 'conectar_linkedin' })
+    const res = await nextTurn(db, admin, '111', { clase: 'texto', texto: TOKEN })
+    expect(res.estado).toBe('conectando_canal')
+
+    const row = db.prepare(
+      "SELECT data_json FROM sessions WHERE user_id = ? AND chat_id = '111'"
+    ).get(admin.id)
+    expect(row).toBeTruthy()
+
+    // la fila cruda (tal como vive en el archivo sqlite) no debe contener el valor en claro
+    expect(row.data_json).not.toContain(TOKEN)
+
+    // pero descifrando el campo borrador con el helper de crypto sí aparece el valor guardado
+    const data = JSON.parse(row.data_json)
+    expect(typeof data.borrador).toBe('string')
+    expect(decryptJson(data.borrador)).toEqual({ access_token: TOKEN })
+  })
 })

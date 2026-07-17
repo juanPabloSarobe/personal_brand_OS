@@ -13,6 +13,7 @@ import { processEvidence } from '../services/evidence-pipeline.js'
 import { entitiesFor } from '../services/entities-store.js'
 import { AiError } from '../ai/client.js'
 import { can } from '../permissions.js'
+import { encryptJson, decryptJson } from '../crypto.js'
 
 const BOTONES_IDEA = [
   { id: 'idea_desarrollar', label: '✍️ Desarrollar' },
@@ -54,6 +55,28 @@ const CAMPO_PROMPT = {
     access_token: 'Pegame el access_token de Instagram (lo sacás de tu app en developers.facebook.com)',
     ig_user_id: 'Ahora pasame el ig_user_id de Instagram (el ID numérico de tu cuenta Business, lo ves en el Graph API Explorer)',
   },
+}
+
+// El estado 'conectando_canal' guarda credenciales field-by-field en session.data.borrador
+// mientras dura la conversación (hasta 2h de TTL). Para que ese valor no quede en claro en
+// sessions.data_json mientras el flujo está a mitad de camino, el borrador se cifra con
+// encryptJson/decryptJson (misma MASTER_KEY que profile_channels.credentials_enc) antes de
+// pasar por setSession, y se descifra al leer la sesión. El resto de session.data
+// (profileId, channel, paso) no son secretos y quedan en claro para poder rutear sin
+// descifrar innecesariamente.
+function cifrarBorrador(borrador) {
+  return encryptJson(borrador)
+}
+
+function leerBorrador(session) {
+  const enc = session?.data?.borrador
+  if (!enc) return {}
+  try {
+    return decryptJson(enc)
+  } catch (err) {
+    console.error('no se pudo descifrar el borrador de conectando_canal:', err)
+    return {}
+  }
 }
 
 // Formato propuesto por canal cuando la idea tiene una foto de evidencia disponible.
@@ -299,7 +322,7 @@ function handleInvitar(db, user, chatId, comando) {
 // arranca (o retoma tras elegir perfil) el estado 'conectando_canal': primer paso,
 // pedir qué canal conectar con botones.
 function iniciarConexionCanal(db, user, chatId, profile) {
-  setSession(db, user.id, chatId, 'conectando_canal', { profileId: profile.id, paso: 'canal', borrador: {} })
+  setSession(db, user.id, chatId, 'conectando_canal', { profileId: profile.id, paso: 'canal', borrador: cifrarBorrador({}) })
   return { texto: `¿Qué canal conectamos para ${profile.name}?`, botones: BOTONES_CANAL, estado: 'conectando_canal' }
 }
 
@@ -334,7 +357,7 @@ function handleCanalElegido(db, user, chatId, session, boton) {
   const channel = boton === 'conectar_linkedin' ? 'linkedin' : 'instagram'
   const profileId = session.data?.profileId
   const campos = CAMPOS_CANAL[channel]
-  setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: 'campo_0', borrador: {} })
+  setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: 'campo_0', borrador: cifrarBorrador({}) })
   return { texto: CAMPO_PROMPT[channel][campos[0]], botones: [], estado: 'conectando_canal' }
 }
 
@@ -343,7 +366,8 @@ function handleCanalElegido(db, user, chatId, session, boton) {
 // mostrando solo los últimos 4 caracteres del access_token — nunca el valor completo,
 // ni acá ni en las confirmaciones intermedias.
 function handleTextoConectar(db, user, chatId, session, input) {
-  const { profileId, channel, paso, borrador = {} } = session.data
+  const { profileId, channel, paso } = session.data
+  const borrador = leerBorrador(session)
   const campos = CAMPOS_CANAL[channel]
   const idx = Number(paso.slice('campo_'.length))
   const campoActual = campos[idx]
@@ -351,7 +375,7 @@ function handleTextoConectar(db, user, chatId, session, input) {
 
   if (idx + 1 < campos.length) {
     const siguienteCampo = campos[idx + 1]
-    setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: `campo_${idx + 1}`, borrador: nuevoBorrador })
+    setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: `campo_${idx + 1}`, borrador: cifrarBorrador(nuevoBorrador) })
     return { texto: `✅ Guardado. ${CAMPO_PROMPT[channel][siguienteCampo]}`, botones: [], estado: 'conectando_canal' }
   }
 

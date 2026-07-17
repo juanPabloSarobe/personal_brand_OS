@@ -253,3 +253,35 @@ describe('migración: índice único de versiones', () => {
     }
   })
 })
+
+describe('barrido de sesiones vencidas al arrancar', () => {
+  it('openDb borra sesiones ya vencidas y conserva las que siguen vigentes', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'pbos-migracion-'))
+    const dbPath = path.join(dir, 'test.db')
+    process.env.ADMIN_CHAT_ID = '111'
+    process.env.ADMIN_NAME = 'Juan Pablo'
+
+    let db = openDb({ dbPath })
+    const userId = db.prepare("SELECT id FROM users WHERE telegram_chat_id='111'").get().id
+
+    // sesión vencida: expires_at en el pasado.
+    db.prepare(`
+      INSERT INTO sessions (user_id, chat_id, state, data_json, expires_at)
+      VALUES (?, 'vencida', 'conectando_canal', '{}', datetime('now', '-1 hour'))
+    `).run(userId)
+    // sesión vigente: expires_at en el futuro.
+    db.prepare(`
+      INSERT INTO sessions (user_id, chat_id, state, data_json, expires_at)
+      VALUES (?, 'vigente', 'conectando_canal', '{}', datetime('now', '+1 hour'))
+    `).run(userId)
+    db.close()
+
+    // reabrir la DB dispara el barrido de sesiones vencidas al arrancar
+    db = openDb({ dbPath })
+
+    const vencida = db.prepare("SELECT * FROM sessions WHERE chat_id = 'vencida'").get()
+    const vigente = db.prepare("SELECT * FROM sessions WHERE chat_id = 'vigente'").get()
+    expect(vencida).toBeUndefined()
+    expect(vigente).toBeTruthy()
+  })
+})

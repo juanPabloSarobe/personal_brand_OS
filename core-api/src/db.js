@@ -51,6 +51,18 @@ export function openDb({ dbPath = process.env.DB_PATH || '/data/pbos.db' } = {})
     console.error('no se pudo deduplicar channel_versions / crear idx_cv_draft_channel:', err)
   }
 
+  // Barrido de sesiones vencidas. getSession ya filtra por expires_at en la lectura,
+  // pero nada borraba las filas vencidas — un flujo abandonado (ej. /conectar a mitad
+  // de camino) quedaba en sessions.data_json indefinidamente hasta que ese mismo
+  // user+chat arrancara otro flujo y pisara la fila. Este barrido solo corre al
+  // arrancar (cada openDb), no es un sweep continuo/periódico — alcance v1 aceptado
+  // porque el filtro por TTL en lectura ya cubre el resto del tiempo de vida del proceso.
+  try {
+    db.exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+  } catch (err) {
+    console.error('no se pudo barrer sesiones vencidas:', err)
+  }
+
   ensureAdmin(db)
   return db
 }
