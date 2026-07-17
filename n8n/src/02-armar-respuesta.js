@@ -1,6 +1,36 @@
-// Entrada: respuesta full de "Persistir evidencia" ({statusCode, body} o {error})
+// Entrada: respuesta full del HTTP next-turn ({statusCode, body:{texto, botones, estado}} o {error}),
+// o pass-through de "Armar turno evidencia" ({respuestaDirecta:{...}}), o ayuda local de
+// "Preparar turno" ({camino:'ayuda', chatId, texto}).
 const r = $json
-const chatId = $('Preparar evidencia').first().json.chatId
+
+function chatIdDelTurno() {
+  return $('Preparar turno').first().json.chatId
+}
+
+function filasDeTeclado(botones) {
+  const filas = []
+  for (let i = 0; i < botones.length; i += 3) {
+    filas.push(botones.slice(i, i + 3).map((b) => ({ text: b.label, callback_data: b.id })))
+  }
+  return filas
+}
+
+function truncar(texto) {
+  if (typeof texto !== 'string') return texto
+  return texto.length > 4000 ? texto.slice(0, 3997) + '…' : texto
+}
+
+// pass-through: el nodo "Armar turno evidencia" ya resolvió la respuesta (403/error de persistencia)
+if (r.respuestaDirecta) {
+  return [{ json: { ...r.respuestaDirecta, texto: truncar(r.respuestaDirecta.texto) } }]
+}
+
+// ayuda local (/start) resuelta en "Preparar turno"
+if (r.camino === 'ayuda') {
+  return [{ json: { responder: true, chatId: r.chatId, texto: truncar(r.texto) } }]
+}
+
+const chatId = r.chatId || chatIdDelTurno()
 const status = r.statusCode
 const body = r.body || {}
 
@@ -9,24 +39,17 @@ if (status === 403) {
   return [{ json: { responder: false, chatId } }]
 }
 
-if (status !== 201 || !body.folio) {
+if (r.error || status !== 200) {
   return [{ json: {
     responder: true,
     chatId,
-    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',
+    texto: '⚠️ Algo falló de mi lado. No pude procesar tu mensaje — probá de nuevo en unos minutos.',
   } }]
 }
 
-const det = body.detalle || {}
-const lineas = [`📎 Evidencia ${body.folio} guardada.`]
-if (det.transcription) lineas.push(`🎙️ Escuché: «${det.transcription}»`)
-if (det.vision_description) lineas.push(`🖼 Veo: ${det.vision_description}`)
-if (Array.isArray(det.entities) && det.entities.length) {
-  lineas.push('🏷 ' + det.entities.map((e) => e.name).join(', '))
+const salida = { responder: true, chatId, texto: truncar(body.texto) }
+if (Array.isArray(body.botones) && body.botones.length) {
+  salida.reply_markup = { inline_keyboard: filasDeTeclado(body.botones) }
 }
-if (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')
 
-let texto = lineas.join('\n')
-if (texto.length > 4000) texto = texto.slice(0, 3997) + '…'
-
-return [{ json: { responder: true, chatId, texto } }]
+return [{ json: salida }]

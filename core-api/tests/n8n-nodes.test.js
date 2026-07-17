@@ -1,93 +1,97 @@
 import { describe, it, expect } from 'vitest'
 import { runCodeNode } from './n8n-harness.js'
 
-describe('nodo 01: preparar evidencia', () => {
-  it('comando → ayuda', () => {
-    const [out] = runCodeNode('01-preparar-evidencia.js', {
-      json: { body: { chatId: '9', tipo: 'comando', comando: '/start', texto: '/start' } },
+describe('nodo 01: preparar turno', () => {
+  it('foto → camino evidencia', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', {
+      json: { body: { chatId: '9', tipo: 'foto', filename: 'f.jpg', content_base64: 'QQ==', caption: 'obra' } },
     })
-    expect(out.json.esComando).toBe(true)
-    expect(out.json.chatId).toBe('9')
-    expect(out.json.texto).toMatch(/Personal Brand OS/)
+    expect(out.json.camino).toBe('evidencia')
+    expect(out.json.evidencePost.type).toBe('foto')
   })
 
-  it('audio → evidencePost completo', () => {
-    const [out] = runCodeNode('01-preparar-evidencia.js', {
-      json: { body: { chatId: '9', tipo: 'audio', filename: 'nota-de-voz.ogg', content_base64: 'QUJD', caption: 'en obra' } },
-    })
-    expect(out.json.esComando).toBe(false)
-    expect(out.json.evidencePost).toEqual({
-      type: 'audio',
-      text: null,
-      filename: 'nota-de-voz.ogg',
-      content_base64: 'QUJD',
-      context: { origen: 'telegram', caption: 'en obra' },
-    })
+  it('texto → turno clase texto', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', { json: { body: { chatId: '9', tipo: 'texto', texto: 'hola' } } })
+    expect(out.json).toEqual({ chatId: '9', camino: 'turno', input: { clase: 'texto', texto: 'hola' } })
   })
 
-  it('texto → evidencePost con text', () => {
-    const [out] = runCodeNode('01-preparar-evidencia.js', {
-      json: { body: { chatId: '9', tipo: 'texto', texto: 'probamos el sensor' } },
-    })
-    expect(out.json.evidencePost.type).toBe('texto')
-    expect(out.json.evidencePost.text).toBe('probamos el sensor')
+  it('boton → turno clase boton', () => {
+    const [out] = runCodeNode('01-preparar-turno.js', { json: { body: { chatId: '9', tipo: 'boton', boton: 'idea_guardar' } } })
+    expect(out.json.input).toEqual({ clase: 'boton', boton: 'idea_guardar' })
+  })
+
+  it('/start → ayuda local; otros comandos → turno', () => {
+    const [ayuda] = runCodeNode('01-preparar-turno.js', { json: { body: { chatId: '9', tipo: 'comando', comando: '/start' } } })
+    expect(ayuda.json.camino).toBe('ayuda')
+    expect(ayuda.json.texto).toMatch(/\/cola/)
+    const [cola] = runCodeNode('01-preparar-turno.js', { json: { body: { chatId: '9', tipo: 'comando', comando: '/cola', texto: '/cola' } } })
+    expect(cola.json.input).toEqual({ clase: 'comando', comando: '/cola' })
   })
 })
 
-describe('nodo 02: armar respuesta', () => {
-  const nodes = { 'Preparar evidencia': { chatId: '9' } }
-
-  it('201 con detalle → eco completo', () => {
-    const [out] = runCodeNode('02-armar-respuesta.js', {
-      json: {
-        statusCode: 201,
-        body: {
-          folio: 'E-0042', processed: true,
-          detalle: {
-            transcription: 'probamos SkyTrace',
-            vision_description: null,
-            entities: [{ kind: 'empresa', name: 'SkyTrace' }],
-          },
-        },
-      },
+describe('nodo 03: armar turno evidencia', () => {
+  const nodes = { 'Preparar turno': { chatId: '9' } }
+  it('201 → input evidencia', () => {
+    const [out] = runCodeNode('03-armar-turno-evidencia.js', {
+      json: { statusCode: 201, body: { id: 1, folio: 'E-0001', processed: true, detalle: { transcription: 'x', vision_description: null, entities: [] } } },
       nodes,
     })
-    expect(out.json.responder).toBe(true)
-    expect(out.json.texto).toContain('E-0042')
-    expect(out.json.texto).toContain('probamos SkyTrace')
-    expect(out.json.texto).toContain('SkyTrace')
+    expect(out.json.input.clase).toBe('evidencia')
+    expect(out.json.input.evidencia.folio).toBe('E-0001')
   })
+  it('403 → respuestaDirecta silencio', () => {
+    const [out] = runCodeNode('03-armar-turno-evidencia.js', { json: { statusCode: 403, body: {} }, nodes })
+    expect(out.json.respuestaDirecta.responder).toBe(false)
+  })
+  it('error → respuestaDirecta fallback', () => {
+    const [out] = runCodeNode('03-armar-turno-evidencia.js', { json: { error: 'ECONNREFUSED' }, nodes })
+    expect(out.json.respuestaDirecta.responder).toBe(true)
+    expect(out.json.respuestaDirecta.texto).toMatch(/no pude guardar/i)
+  })
+})
 
-  it('403 → silencio administrativo', () => {
-    const [out] = runCodeNode('02-armar-respuesta.js', { json: { statusCode: 403, body: {} }, nodes })
+describe('nodo 02: armar respuesta v2', () => {
+  const nodes = { 'Preparar turno': { chatId: '9' } }
+  it('turno con botones → inline keyboard en filas de 3', () => {
+    const botones = [
+      { id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }, { id: 'd', label: 'D' },
+    ]
+    const [out] = runCodeNode('02-armar-respuesta.js', {
+      json: { statusCode: 200, body: { texto: 'elegí', botones, estado: 'x' } }, nodes,
+    })
+    expect(out.json.responder).toBe(true)
+    expect(out.json.reply_markup.inline_keyboard).toEqual([
+      [{ text: 'A', callback_data: 'a' }, { text: 'B', callback_data: 'b' }, { text: 'C', callback_data: 'c' }],
+      [{ text: 'D', callback_data: 'd' }],
+    ])
+  })
+  it('sin botones → sin reply_markup', () => {
+    const [out] = runCodeNode('02-armar-respuesta.js', {
+      json: { statusCode: 200, body: { texto: 'ok', botones: [], estado: 'inicio' } }, nodes,
+    })
+    expect(out.json.reply_markup).toBeUndefined()
+  })
+  it('respuestaDirecta pasa tal cual', () => {
+    const [out] = runCodeNode('02-armar-respuesta.js', {
+      json: { respuestaDirecta: { responder: false, chatId: '9' } }, nodes,
+    })
     expect(out.json.responder).toBe(false)
   })
-
-  it('error de la API → fallback amable que no pierde la captura', () => {
-    const [out] = runCodeNode('02-armar-respuesta.js', { json: { error: 'ECONNREFUSED' }, nodes })
-    expect(out.json.responder).toBe(true)
-    expect(out.json.texto).toMatch(/no pude guardar/i)
-  })
-
-  it('processed false → avisa que procesa más tarde', () => {
+  it('ayuda pasa con texto', () => {
     const [out] = runCodeNode('02-armar-respuesta.js', {
-      json: { statusCode: 201, body: { folio: 'E-0001', processed: false, detalle: { transcription: null, vision_description: null, entities: [] } } },
-      nodes,
+      json: { camino: 'ayuda', chatId: '9', texto: 'ayuda...' }, nodes,
     })
-    expect(out.json.texto).toContain('E-0001')
-    expect(out.json.texto).toMatch(/más tarde/)
+    expect(out.json).toMatchObject({ responder: true, chatId: '9', texto: 'ayuda...' })
   })
-
-  it('texto largo se trunca a 4000', () => {
+  it('403 del turno → silencio; error → fallback', () => {
+    const [s] = runCodeNode('02-armar-respuesta.js', { json: { statusCode: 403, body: {} }, nodes })
+    expect(s.json.responder).toBe(false)
+    const [e] = runCodeNode('02-armar-respuesta.js', { json: { error: 'boom' }, nodes })
+    expect(e.json.texto).toMatch(/falló|no pude/i)
+  })
+  it('trunca a 4000', () => {
     const [out] = runCodeNode('02-armar-respuesta.js', {
-      json: {
-        statusCode: 201,
-        body: {
-          folio: 'E-0002', processed: true,
-          detalle: { transcription: 'a'.repeat(5000), vision_description: null, entities: [] },
-        },
-      },
-      nodes,
+      json: { statusCode: 200, body: { texto: 'a'.repeat(5000), botones: [], estado: 'x' } }, nodes,
     })
     expect(out.json.texto.length).toBeLessThanOrEqual(4000)
   })
