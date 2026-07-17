@@ -1,0 +1,280 @@
+{
+  "id": "pbos-telegram",
+  "name": "Personal Brand OS — Captura Telegram",
+  "nodes": [
+    {
+      "id": "pbos-01",
+      "name": "Webhook Telegram",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "pbos-telegram",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "pbos-02",
+      "name": "ACK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ok: true}) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "pbos-03",
+      "name": "Preparar evidencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Entrada: POST del puente-telegram — $json.body = {chatId, tipo, texto?, comando?, caption?, filename?, content_base64?}\nconst b = $json.body || $json\n\nconst AYUDA = [\n  '👋 Soy tu Personal Brand OS.',\n  'Mandame fotos, audios, videos o texto con tus avances personales y laborales, y los archivo como evidencia procesada (transcripción, descripción y entidades).',\n  '',\n  'Comandos: /start — esta ayuda',\n].join('\\n')\n\nif (b.tipo === 'comando') {\n  return [{ json: { chatId: b.chatId, esComando: true, texto: AYUDA } }]\n}\n\nconst evidencePost = {\n  type: b.tipo,\n  text: b.texto || null,\n  filename: b.filename || null,\n  content_base64: b.content_base64 || null,\n  context: { origen: 'telegram', caption: b.caption || null },\n}\nreturn [{ json: { chatId: b.chatId, esComando: false, evidencePost } }]"
+      }
+    },
+    {
+      "id": "pbos-04",
+      "name": "¿Es comando?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.esComando }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pbos-05",
+      "name": "Persistir evidencia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CORE_API_URL }}/api/evidence",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Telegram-Chat-Id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.evidencePost) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "pbos-06",
+      "name": "Armar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        380
+      ],
+      "parameters": {
+        "jsCode": "// Entrada: respuesta full de \"Persistir evidencia\" ({statusCode, body} o {error})\nconst r = $json\nconst chatId = $('Preparar evidencia').first().json.chatId\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { responder: false, chatId } }]\n}\n\nif (status !== 201 || !body.folio) {\n  return [{ json: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',\n  } }]\n}\n\nconst det = body.detalle || {}\nconst lineas = [`📎 Evidencia ${body.folio} guardada.`]\nif (det.transcription) lineas.push(`🎙️ Escuché: «${det.transcription}»`)\nif (det.vision_description) lineas.push(`🖼 Veo: ${det.vision_description}`)\nif (Array.isArray(det.entities) && det.entities.length) {\n  lineas.push('🏷 ' + det.entities.map((e) => e.name).join(', '))\n}\nif (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')\n\nreturn [{ json: { responder: true, chatId, texto: lineas.join('\\n') } }]"
+      }
+    },
+    {
+      "id": "pbos-07",
+      "name": "¿Responder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        380
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.responder }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pbos-08",
+      "name": "Enviar por Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.texto }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Telegram": {
+      "main": [
+        [
+          {
+            "node": "ACK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ACK": {
+      "main": [
+        [
+          {
+            "node": "Preparar evidencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar evidencia": {
+      "main": [
+        [
+          {
+            "node": "¿Es comando?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es comando?": {
+      "main": [
+        [
+          {
+            "node": "Enviar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persistir evidencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persistir evidencia": {
+      "main": [
+        [
+          {
+            "node": "Armar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar respuesta": {
+      "main": [
+        [
+          {
+            "node": "¿Responder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Responder?": {
+      "main": [
+        [
+          {
+            "node": "Enviar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
