@@ -1,0 +1,369 @@
+import path from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { getSession, setSession, clearSession } from '../services/sessions.js'
+import {
+  createIdea, setIdeaStatus, linkIdeaProfiles, createDraft, updateDraft,
+  setDraftStatus, createChannelVersion, pendingFor, connectedChannels,
+} from '../services/editorial.js'
+import { proponerIdea, redactarBoceto, refinarBoceto, adaptarVersion } from '../services/redactor.js'
+import { renderChannelImage, FORMAT_DIMENSIONS } from '../services/imagen.js'
+import { AiError } from '../ai/client.js'
+
+const BOTONES_IDEA = [
+  { id: 'idea_desarrollar', label: '✍️ Desarrollar' },
+  { id: 'idea_guardar', label: '📥 Solo guardar' },
+  { id: 'idea_descartar', label: '🗑 Descartar' },
+]
+const BOTONES_BOCETO = [
+  { id: 'boceto_aprobar', label: '✅ Aprobar' },
+  { id: 'boceto_otra', label: '🔄 Otra versión' },
+  { id: 'boceto_descartar', label: '🗑 Descartar' },
+]
+const BOTONES_PROG = [
+  { id: 'prog_ahora', label: '🚀 Ahora' },
+  { id: 'prog_maniana', label: '🌅 Mañana 9hs' },
+  { id: 'prog_cola', label: '⏳ A la cola' },
+]
+
+// Formato propuesto por canal cuando la idea tiene una foto de evidencia disponible.
+const FORMATO_CON_IMAGEN = { linkedin: 'imagen', instagram: 'feed', wa_status: 'historia' }
+// Formato propuesto por canal cuando no hay imagen (solo texto). instagram/wa_status
+// no tienen formato de solo-texto viable → se saltean.
+const FORMATO_SOLO_TEXTO = { linkedin: 'texto' }
+
+export async function nextTurn(db, user, chatId, input, { fetchImpl } = {}) {
+  try {
+    return await dispatch(db, user, chatId, input, { fetchImpl })
+  } catch (err) {
+    // regla de oro: jamás romper la conversación
+    return {
+      texto: '⚠️ Algo falló de mi lado. Tu material está guardado — probá de nuevo en un rato.',
+      botones: [],
+      estado: (getSession(db, user.id, chatId) || { state: 'inicio' }).state,
+    }
+  }
+}
+
+async function dispatch(db, user, chatId, input, opts) {
+  if (input.clase === 'evidencia') return handleEvidencia(db, user, chatId, input.evidencia, opts)
+  if (input.clase === 'comando') return handleComando(db, user, chatId, input)
+  if (input.clase === 'texto') return handleTexto(db, user, chatId, input, opts)
+  if (input.clase === 'boton') return handleBoton(db, user, chatId, input, opts)
+  return textoGuia(getSession(db, user.id, chatId))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers de lectura
+// ---------------------------------------------------------------------------
+
+function perfilesDe(db, userId) {
+  return db.prepare(`
+    SELECT bp.* FROM user_profile_access upa
+    JOIN brand_profiles bp ON bp.id = upa.profile_id
+    WHERE upa.user_id = ?
+    ORDER BY bp.id
+  `).all(userId)
+}
+
+function evidenciasDeIdea(db, ideaId) {
+  return db.prepare(`
+    SELECT e.* FROM idea_evidence ie
+    JOIN evidence e ON e.id = ie.evidence_id
+    WHERE ie.idea_id = ?
+    ORDER BY e.id
+  `).all(ideaId)
+}
+
+// primera evidencia tipo foto con archivo, vinculada a la idea (para renderizar versiones con imagen)
+function fotoDeIdea(db, ideaId) {
+  return db.prepare(`
+    SELECT e.* FROM idea_evidence ie
+    JOIN evidence e ON e.id = ie.evidence_id
+    WHERE ie.idea_id = ? AND e.type = 'foto' AND e.file_path IS NOT NULL
+    ORDER BY e.id LIMIT 1
+  `).get(ideaId) || null
+}
+
+function nowSql(db) {
+  return db.prepare("SELECT datetime('now') AS t").get().t
+}
+
+function tomorrowNineSql(db) {
+  return db.prepare("SELECT datetime('now', '+1 day', 'start of day', '+9 hours') AS t").get().t
+}
+
+function presentarBoceto(profile, content) {
+  return `📝 *${profile.name}*\n\n${content}`
+}
+
+function textoGuia(session) {
+  return {
+    texto: 'Mandame una foto, un audio o un texto para capturar una idea. Escribí /cola para ver qué tenés pendiente.',
+    botones: [],
+    estado: session?.state || 'inicio',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// evidencia → propone idea
+// ---------------------------------------------------------------------------
+
+async function handleEvidencia(db, user, chatId, evidencia, opts) {
+  const row = evidencia?.id ? db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidencia.id) : null
+  try {
+    const { title, summary, raw } = await proponerIdea(row ? [row] : [], opts)
+    const ideaId = createIdea(db, {
+      userId: user.id, title, summary,
+      evidenceIds: row ? [row.id] : [],
+    })
+    if (raw) db.prepare('UPDATE ideas SET raw_llm_json = ? WHERE id = ?').run(JSON.stringify(raw), ideaId)
+    setSession(db, user.id, chatId, 'proponiendo_idea', { ideaId })
+    return {
+      texto: `💡 *${title}*${summary ? `\n${summary}` : ''}\n\n¿Qué hacemos con esto?`,
+      botones: BOTONES_IDEA,
+      estado: 'proponiendo_idea',
+    }
+  } catch (err) {
+    if (!(err instanceof AiError)) throw err
+    // la captura nunca se pierde: guardamos la idea en crudo aunque la IA no responda
+    const fallbackTitle = row?.text_content || row?.transcription || row?.vision_description || 'Evidencia sin título'
+    if (row) createIdea(db, { userId: user.id, title: fallbackTitle, summary: null, evidenceIds: [row.id] })
+    setSession(db, user.id, chatId, 'inicio', {})
+    return {
+      texto: `📥 Evidencia ${evidencia?.folio || ''} guardada. No pude generar la propuesta ahora (la IA no respondió), pero tu material quedó a salvo — probá de nuevo en un rato o mirá /cola.`,
+      botones: [],
+      estado: 'inicio',
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// comando: /cola, /idea <texto>
+// ---------------------------------------------------------------------------
+
+async function handleComando(db, user, chatId, input) {
+  const comando = input.comando || ''
+  if (comando === '/cola') {
+    const p = pendingFor(db, user.id)
+    const lineas = []
+    if (p.ideas.length) lineas.push(`💡 Ideas sin desarrollar: ${p.ideas.map((i) => i.title).join(', ')}`)
+    if (p.drafts.length) lineas.push(`📝 Bocetos en refinamiento: ${p.drafts.map((d) => `${d.title} (${d.profile})`).join(', ')}`)
+    if (p.programadas.length) lineas.push(`📅 Programadas: ${p.programadas.map((v) => `${v.channel} ${v.scheduled_at}`).join(', ')}`)
+    const texto = lineas.length ? lineas.join('\n') : 'No tenés nada pendiente 🎉'
+    return { texto, botones: [], estado: 'inicio' }
+  }
+  if (comando.startsWith('/idea')) {
+    const titulo = comando.slice('/idea'.length).trim() || 'Idea sin título'
+    const ideaId = createIdea(db, { userId: user.id, title: titulo, summary: null, evidenceIds: [] })
+    setSession(db, user.id, chatId, 'proponiendo_idea', { ideaId })
+    return {
+      texto: `💡 *${titulo}*\n\n¿Qué hacemos con esto?`,
+      botones: BOTONES_IDEA,
+      estado: 'proponiendo_idea',
+    }
+  }
+  return textoGuia(getSession(db, user.id, chatId))
+}
+
+// ---------------------------------------------------------------------------
+// texto: feedback en refinando_boceto
+// ---------------------------------------------------------------------------
+
+async function handleTexto(db, user, chatId, input, opts) {
+  const session = getSession(db, user.id, chatId) || { state: 'inicio', data: {} }
+  if (session.state === 'refinando_boceto' && session.data?.draftId) {
+    const { ideaId, profileId, draftId, queue = [] } = session.data
+    const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+    const draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(draftId)
+    const { content, raw } = await refinarBoceto(profile, draft.content, input.texto, opts)
+    updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
+    setSession(db, user.id, chatId, 'refinando_boceto', { ideaId, profileId, draftId, queue })
+    return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+  }
+  return textoGuia(session)
+}
+
+// ---------------------------------------------------------------------------
+// boton: idea_*, perfil_*, boceto_*, prog_*
+// ---------------------------------------------------------------------------
+
+async function handleBoton(db, user, chatId, input, opts) {
+  const session = getSession(db, user.id, chatId) || { state: 'inicio', data: {} }
+  const boton = input.boton || ''
+
+  if (boton === 'idea_desarrollar') return handleIdeaDesarrollar(db, user, chatId, session, opts)
+  if (boton === 'idea_guardar') return handleIdeaGuardar(db, user, chatId, session)
+  if (boton === 'idea_descartar') return handleIdeaDescartar(db, user, chatId, session)
+  if (boton.startsWith('perfil_')) return handlePerfilElegido(db, user, chatId, session, boton, opts)
+  if (boton === 'boceto_aprobar') return handleBocetoAprobar(db, user, chatId, session, opts)
+  if (boton === 'boceto_otra') return handleBocetoOtra(db, user, chatId, session, opts)
+  if (boton === 'boceto_descartar') return handleBocetoDescartar(db, user, chatId, session, opts)
+  if (boton.startsWith('prog_')) return handleProgramar(db, user, chatId, session, boton, opts)
+  return textoGuia(session)
+}
+
+function handleIdeaGuardar(db, user, chatId, session) {
+  const ideaId = session.data?.ideaId
+  if (ideaId) setIdeaStatus(db, ideaId, 'capturada')
+  setSession(db, user.id, chatId, 'inicio', {})
+  return { texto: '📥 Guardada en tu cola de ideas. Escribí /cola cuando quieras retomarla.', botones: [], estado: 'inicio' }
+}
+
+function handleIdeaDescartar(db, user, chatId, session) {
+  const ideaId = session.data?.ideaId
+  if (ideaId) setIdeaStatus(db, ideaId, 'descartada')
+  setSession(db, user.id, chatId, 'inicio', {})
+  return { texto: '🗑 Descartada. Cuando tengas otra novedad, mandámela.', botones: [], estado: 'inicio' }
+}
+
+async function handleIdeaDesarrollar(db, user, chatId, session, opts) {
+  const ideaId = session.data?.ideaId
+  const idea = ideaId ? db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId) : null
+  if (!idea) return textoGuia(session)
+
+  const perfiles = perfilesDe(db, user.id)
+  if (perfiles.length === 0) {
+    setSession(db, user.id, chatId, 'inicio', {})
+    return { texto: 'Todavía no tenés perfiles de marca asignados — pedile a un admin que te invite.', botones: [], estado: 'inicio' }
+  }
+  if (perfiles.length === 1) {
+    linkIdeaProfiles(db, idea.id, [perfiles[0].id])
+    setIdeaStatus(db, idea.id, 'en_conversacion')
+    return await redactarParaPerfil(db, user, chatId, idea, perfiles[0], [], opts)
+  }
+  setSession(db, user.id, chatId, 'eligiendo_perfiles', { ideaId: idea.id })
+  const botones = [
+    ...perfiles.map((p) => ({ id: `perfil_${p.id}`, label: `👤 ${p.name}` })),
+    { id: 'perfil_ambas', label: '👥 Ambas' },
+  ]
+  return { texto: `¿Para qué perfil desarrollamos "${idea.title}"?`, botones, estado: 'eligiendo_perfiles' }
+}
+
+async function handlePerfilElegido(db, user, chatId, session, boton, opts) {
+  const ideaId = session.data?.ideaId
+  const idea = ideaId ? db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId) : null
+  if (!idea) return textoGuia(session)
+
+  const perfiles = perfilesDe(db, user.id)
+  let elegidos
+  if (boton === 'perfil_ambas') {
+    elegidos = perfiles
+  } else {
+    const pid = Number(boton.slice('perfil_'.length))
+    elegidos = perfiles.filter((p) => p.id === pid)
+  }
+  if (elegidos.length === 0) return textoGuia(session)
+
+  linkIdeaProfiles(db, idea.id, elegidos.map((p) => p.id))
+  setIdeaStatus(db, idea.id, 'en_conversacion')
+  const [primero, ...resto] = elegidos
+  return await redactarParaPerfil(db, user, chatId, idea, primero, resto.map((p) => p.id), opts)
+}
+
+async function redactarParaPerfil(db, user, chatId, idea, profile, queueIds, opts) {
+  const evidencias = evidenciasDeIdea(db, idea.id)
+  const { content, raw } = await redactarBoceto(profile, idea, evidencias, opts)
+  const draftId = createDraft(db, { ideaId: idea.id, profileId: profile.id, content, rawLlm: raw ? JSON.stringify(raw) : null })
+  setSession(db, user.id, chatId, 'refinando_boceto', { ideaId: idea.id, profileId: profile.id, draftId, queue: queueIds })
+  return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+}
+
+async function handleBocetoAprobar(db, user, chatId, session, opts) {
+  const { ideaId, draftId, queue = [] } = session.data || {}
+  if (!draftId) return textoGuia(session)
+  setDraftStatus(db, draftId, 'aprobado')
+  const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
+  return await avanzarCola(db, user, chatId, idea, queue, opts)
+}
+
+async function handleBocetoDescartar(db, user, chatId, session, opts) {
+  const { ideaId, draftId, queue = [] } = session.data || {}
+  if (!draftId) return textoGuia(session)
+  setDraftStatus(db, draftId, 'descartado')
+  const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
+  return await avanzarCola(db, user, chatId, idea, queue, opts)
+}
+
+async function handleBocetoOtra(db, user, chatId, session, opts) {
+  const { ideaId, profileId, draftId, queue = [] } = session.data || {}
+  if (!draftId) return textoGuia(session)
+  const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId)
+  const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
+  const evidencias = evidenciasDeIdea(db, idea.id)
+  const { content, raw } = await redactarBoceto(profile, idea, evidencias, opts)
+  updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
+  setSession(db, user.id, chatId, 'refinando_boceto', { ideaId: idea.id, profileId: profile.id, draftId, queue })
+  return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+}
+
+// tras aprobar/descartar un boceto: sigue con el próximo perfil en cola, o pasa
+// a programar (si hay algo aprobado) o vuelve a inicio (si no quedó nada).
+async function avanzarCola(db, user, chatId, idea, queue, opts) {
+  if (queue.length > 0) {
+    const [nextId, ...resto] = queue
+    const nextProfile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(nextId)
+    return await redactarParaPerfil(db, user, chatId, idea, nextProfile, resto, opts)
+  }
+  const { n: aprobados } = db.prepare("SELECT COUNT(*) n FROM drafts WHERE idea_id = ? AND status = 'aprobado'").get(idea.id)
+  if (aprobados > 0) {
+    setSession(db, user.id, chatId, 'programando', { ideaId: idea.id })
+    return { texto: '¿Cuándo lo publicamos?', botones: BOTONES_PROG, estado: 'programando' }
+  }
+  setSession(db, user.id, chatId, 'inicio', {})
+  return { texto: 'Listo, no quedó nada pendiente de programar.', botones: [], estado: 'inicio' }
+}
+
+// ---------------------------------------------------------------------------
+// prog_*: crea channel_versions por cada canal conectado de cada draft aprobado
+// ---------------------------------------------------------------------------
+
+async function handleProgramar(db, user, chatId, session, boton, opts) {
+  const ideaId = session.data?.ideaId
+  const idea = ideaId ? db.prepare('SELECT * FROM ideas WHERE id = ?').get(ideaId) : null
+  if (!idea) return textoGuia(session)
+
+  const drafts = db.prepare("SELECT * FROM drafts WHERE idea_id = ? AND status = 'aprobado'").all(idea.id)
+  const foto = fotoDeIdea(db, idea.id)
+  const resumen = []
+
+  for (const draft of drafts) {
+    const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(draft.profile_id)
+    const canales = connectedChannels(db, profile.id)
+    for (const canal of canales) {
+      const formatCode = foto ? FORMATO_CON_IMAGEN[canal.code] : FORMATO_SOLO_TEXTO[canal.code]
+      if (!formatCode) continue // sin formato viable para este canal en este escenario
+
+      const adapt = await adaptarVersion(profile, draft.content, canal.code, formatCode, opts)
+
+      let mediaPath = null
+      if (foto) {
+        const dims = FORMAT_DIMENSIONS[`${canal.code}:${formatCode}`]
+        if (dims) {
+          const dir = path.join(process.env.MEDIA_DIR || '/data/media', 'versions')
+          mkdirSync(dir, { recursive: true })
+          const outPath = path.join(dir, `v${draft.id}_${canal.code}_${formatCode}.jpg`)
+          await renderChannelImage(foto.file_path, outPath, { ...dims, label: profile.name })
+          mediaPath = outPath
+        }
+      }
+
+      let status = 'aprobada'
+      let scheduledAt = null
+      if (boton === 'prog_ahora') { status = 'programada'; scheduledAt = nowSql(db) }
+      else if (boton === 'prog_maniana') { status = 'programada'; scheduledAt = tomorrowNineSql(db) }
+
+      createChannelVersion(db, {
+        draftId: draft.id, profileChannelId: canal.id, formatCode,
+        textContent: adapt.text, mediaPath, status, scheduledAt,
+      })
+      resumen.push(`• ${profile.name} → ${canal.code}/${formatCode}${scheduledAt ? ` (📅 ${scheduledAt})` : ' (⏳ a la cola)'}`)
+    }
+  }
+
+  setIdeaStatus(db, idea.id, 'lista')
+  setSession(db, user.id, chatId, 'inicio', {})
+  const texto = resumen.length
+    ? `Listo, quedó así:\n${resumen.join('\n')}`
+    : 'No había canales conectados para publicar esto todavía.'
+  return { texto, botones: [], estado: 'inicio' }
+}
