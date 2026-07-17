@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest'
+import request from 'supertest'
+import { makeTestApp, ADMIN_CHAT, addUser } from './helpers.js'
+
+describe('perfiles de marca', () => {
+  it('admin crea un perfil y queda como owner', async () => {
+    const { app } = makeTestApp()
+    const res = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'Juan Pablo', slug: 'juanpablo', identity: { tono: 'primera persona' } })
+    expect(res.status).toBe(201)
+    const list = await request(app).get('/api/profiles').set('X-Telegram-Chat-Id', ADMIN_CHAT)
+    expect(list.body).toHaveLength(1)
+    expect(list.body[0].role).toBe('owner')
+  })
+
+  it('no-admin no puede crear perfiles', async () => {
+    const { app, db } = makeTestApp()
+    addUser(db, '222')
+    const res = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', '222')
+      .send({ name: 'X', slug: 'x' })
+    expect(res.status).toBe(403)
+  })
+
+  it('AISLAMIENTO: el usuario B no ve ni accede al perfil de A', async () => {
+    const { app, db } = makeTestApp()
+    const created = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'SkyTrace', slug: 'skytrace' })
+    addUser(db, '222')
+    const list = await request(app).get('/api/profiles').set('X-Telegram-Chat-Id', '222')
+    expect(list.body).toEqual([])
+    const detail = await request(app).get(`/api/profiles/${created.body.id}`)
+      .set('X-Telegram-Chat-Id', '222')
+    expect(detail.status).toBe(403)
+  })
+
+  it('solo owner edita el perfil', async () => {
+    const { app, db } = makeTestApp()
+    const created = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'SkyTrace', slug: 'skytrace' })
+    addUser(db, '222')
+    const editorId = db.prepare("SELECT id FROM users WHERE telegram_chat_id='222'").get().id
+    db.prepare("INSERT INTO user_profile_access VALUES (?, ?, 'editor')").run(editorId, created.body.id)
+
+    const asEditor = await request(app).put(`/api/profiles/${created.body.id}`)
+      .set('X-Telegram-Chat-Id', '222').send({ name: 'Hackeado' })
+    expect(asEditor.status).toBe(403)
+
+    const asOwner = await request(app).put(`/api/profiles/${created.body.id}`)
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ identity_json: JSON.stringify({ tono: 'nosotros' }) })
+    expect(asOwner.status).toBe(200)
+  })
+})
