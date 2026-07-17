@@ -8,7 +8,7 @@ services:
     volumes:
       - pbos_data:/data
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
 
   n8n:
@@ -16,11 +16,11 @@ services:
     environment:
       - CORE_API_URL=http://core-api:3000
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - GROQ_API_KEY=${GROQ_API_KEY}
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_SECURE_COOKIE=false
+      - N8N_PAYLOAD_SIZE_MAX=48
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -29,6 +29,7 @@ services:
 
   puente-telegram:
     build: ./puente-telegram
+    init: true
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - N8N_WEBHOOK_URL=http://n8n:5678/webhook/telegram

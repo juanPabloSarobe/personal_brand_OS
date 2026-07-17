@@ -77,4 +77,18 @@ describe('nodo 02: armar respuesta', () => {
     expect(out.json.texto).toContain('E-0001')
     expect(out.json.texto).toMatch(/más tarde/)
   })
+
+  it('texto largo se trunca a 4000', () => {
+    const [out] = runCodeNode('02-armar-respuesta.js', {
+      json: {
+        statusCode: 201,
+        body: {
+          folio: 'E-0002', processed: true,
+          detalle: { transcription: 'a'.repeat(5000), vision_description: null, entities: [] },
+        },
+      },
+      nodes,
+    })
+    expect(out.json.texto.length).toBeLessThanOrEqual(4000)
+  })
 })

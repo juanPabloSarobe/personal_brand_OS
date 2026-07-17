@@ -26,4 +26,7 @@ if (Array.isArray(det.entities) && det.entities.length) {
 }
 if (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')
 
-return [{ json: { responder: true, chatId, texto: lineas.join('\n') } }]
+let texto = lineas.join('\n')
+if (texto.length > 4000) texto = texto.slice(0, 3997) + '…'
+
+return [{ json: { responder: true, chatId, texto } }]

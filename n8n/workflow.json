@@ -67,9 +67,9 @@
           "conditions": [
             {
               "leftValue": "={{ $json.esComando }}",
-              "rightValue": "true",
+              "rightValue": true,
               "operator": {
-                "type": "string",
+                "type": "boolean",
                 "operation": "equals"
               }
             }
@@ -113,7 +113,7 @@
           "response": {
             "response": {
               "fullResponse": true,
-              "neverError": false
+              "neverError": true
             }
           }
         }
@@ -129,7 +129,7 @@
         380
       ],
       "parameters": {
-        "jsCode": "// Entrada: respuesta full de \"Persistir evidencia\" ({statusCode, body} o {error})\nconst r = $json\nconst chatId = $('Preparar evidencia').first().json.chatId\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { responder: false, chatId } }]\n}\n\nif (status !== 201 || !body.folio) {\n  return [{ json: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',\n  } }]\n}\n\nconst det = body.detalle || {}\nconst lineas = [`📎 Evidencia ${body.folio} guardada.`]\nif (det.transcription) lineas.push(`🎙️ Escuché: «${det.transcription}»`)\nif (det.vision_description) lineas.push(`🖼 Veo: ${det.vision_description}`)\nif (Array.isArray(det.entities) && det.entities.length) {\n  lineas.push('🏷 ' + det.entities.map((e) => e.name).join(', '))\n}\nif (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')\n\nreturn [{ json: { responder: true, chatId, texto: lineas.join('\\n') } }]"
+        "jsCode": "// Entrada: respuesta full de \"Persistir evidencia\" ({statusCode, body} o {error})\nconst r = $json\nconst chatId = $('Preparar evidencia').first().json.chatId\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { responder: false, chatId } }]\n}\n\nif (status !== 201 || !body.folio) {\n  return [{ json: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',\n  } }]\n}\n\nconst det = body.detalle || {}\nconst lineas = [`📎 Evidencia ${body.folio} guardada.`]\nif (det.transcription) lineas.push(`🎙️ Escuché: «${det.transcription}»`)\nif (det.vision_description) lineas.push(`🖼 Veo: ${det.vision_description}`)\nif (Array.isArray(det.entities) && det.entities.length) {\n  lineas.push('🏷 ' + det.entities.map((e) => e.name).join(', '))\n}\nif (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')\n\nlet texto = lineas.join('\\n')\nif (texto.length > 4000) texto = texto.slice(0, 3997) + '…'\n\nreturn [{ json: { responder: true, chatId, texto } }]"
       }
     },
     {
@@ -152,9 +152,9 @@
           "conditions": [
             {
               "leftValue": "={{ $json.responder }}",
-              "rightValue": "true",
+              "rightValue": true,
               "operator": {
-                "type": "string",
+                "type": "boolean",
                 "operation": "equals"
               }
             }

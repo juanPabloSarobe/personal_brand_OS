@@ -31,6 +31,7 @@ describe('workflow de n8n', () => {
     const persistir = wf.nodes.find((n) => n.name === 'Persistir evidencia')
     expect(JSON.stringify(persistir.parameters)).toContain('X-Telegram-Chat-Id')
     expect(persistir.parameters.options.response.response.fullResponse).toBe(true)
+    expect(persistir.parameters.options.response.response.neverError).toBe(true)
     expect(persistir.onError).toBe('continueRegularOutput')
   })
 })

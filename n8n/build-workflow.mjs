@@ -25,8 +25,8 @@ const ifNode = (name, leftExpr, position) => ({
       options: { caseSensitive: true, leftValue: '', typeValidation: 'loose', version: 2 },
       conditions: [{
         leftValue: leftExpr,
-        rightValue: 'true',
-        operator: { type: 'string', operation: 'equals' },
+        rightValue: true,
+        operator: { type: 'boolean', operation: 'equals' },
       }],
       combinator: 'and',
     },
@@ -72,7 +72,7 @@ const nodes = [
       jsonBody: '={{ JSON.stringify($json.evidencePost) }}',
       options: {
         timeout: 120000, // el pipeline de IA puede tardar
-        response: { response: { fullResponse: true, neverError: false } },
+        response: { response: { fullResponse: true, neverError: true } },
       },
     },
   },
