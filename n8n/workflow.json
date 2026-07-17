@@ -9,7 +9,7 @@
       "typeVersion": 2,
       "position": [
         0,
-        300
+        400
       ],
       "webhookId": "pbos-telegram",
       "parameters": {
@@ -26,7 +26,7 @@
       "typeVersion": 1.1,
       "position": [
         180,
-        300
+        400
       ],
       "parameters": {
         "respondWith": "json",
@@ -36,47 +36,104 @@
     },
     {
       "id": "pbos-03",
-      "name": "Preparar evidencia",
+      "name": "Preparar turno",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         360,
-        300
+        400
       ],
       "parameters": {
-        "jsCode": "// Entrada: POST del puente-telegram — $json.body = {chatId, tipo, texto?, comando?, caption?, filename?, content_base64?}\nconst b = $json.body || $json\n\nconst AYUDA = [\n  '👋 Soy tu Personal Brand OS.',\n  'Mandame fotos, audios, videos o texto con tus avances personales y laborales, y los archivo como evidencia procesada (transcripción, descripción y entidades).',\n  '',\n  'Comandos: /start — esta ayuda',\n].join('\\n')\n\nif (b.tipo === 'comando') {\n  return [{ json: { chatId: b.chatId, esComando: true, texto: AYUDA } }]\n}\n\nconst evidencePost = {\n  type: b.tipo,\n  text: b.texto || null,\n  filename: b.filename || null,\n  content_base64: b.content_base64 || null,\n  context: { origen: 'telegram', caption: b.caption || null },\n}\nreturn [{ json: { chatId: b.chatId, esComando: false, evidencePost } }]"
+        "jsCode": "// Entrada: POST del puente-telegram — $json.body = {chatId, tipo, texto?, comando?, boton?, caption?, filename?, content_base64?}\nconst b = $json.body || $json\n\nconst AYUDA = [\n  '👋 Soy tu Personal Brand OS.',\n  'Mandame fotos, audios, videos o texto con tus avances personales y laborales, y armamos ideas y contenido juntos.',\n  '',\n  'Comandos:',\n  '/start — esta ayuda',\n  '/cola — ver qué tenés pendiente',\n  '/idea <texto> — cargar una idea directamente',\n].join('\\n')\n\nif (b.tipo === 'comando' && b.comando === '/start') {\n  return [{ json: { chatId: b.chatId, camino: 'ayuda', texto: AYUDA } }]\n}\n\nif (b.tipo === 'comando') {\n  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'comando', comando: b.comando } } }]\n}\n\nif (b.tipo === 'texto') {\n  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'texto', texto: b.texto } } }]\n}\n\nif (b.tipo === 'boton') {\n  return [{ json: { chatId: b.chatId, camino: 'turno', input: { clase: 'boton', boton: b.boton } } }]\n}\n\n// media: foto | audio | video\nconst evidencePost = {\n  type: b.tipo,\n  text: b.texto || null,\n  filename: b.filename || null,\n  content_base64: b.content_base64 || null,\n  context: { origen: 'telegram', caption: b.caption || null },\n}\nreturn [{ json: { chatId: b.chatId, camino: 'evidencia', evidencePost } }]"
       }
     },
     {
       "id": "pbos-04",
-      "name": "¿Es comando?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
+      "name": "Switch camino",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
       "position": [
-        540,
-        300
+        560,
+        400
       ],
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
+        "mode": "rules",
+        "rules": {
+          "values": [
             {
-              "leftValue": "={{ $json.esComando }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.camino }}",
+                    "rightValue": "evidencia",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "evidencia"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.camino }}",
+                    "rightValue": "turno",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "turno"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.camino }}",
+                    "rightValue": "ayuda",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ayuda"
             }
-          ],
-          "combinator": "and"
+          ]
         },
-        "options": {}
+        "options": {
+          "fallbackOutput": "none"
+        }
       }
     },
     {
@@ -85,8 +142,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        760,
-        380
+        780,
+        220
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -121,25 +178,110 @@
     },
     {
       "id": "pbos-06",
-      "name": "Armar respuesta",
+      "name": "Armar turno evidencia",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        980,
-        380
+        1000,
+        220
       ],
       "parameters": {
-        "jsCode": "// Entrada: respuesta full de \"Persistir evidencia\" ({statusCode, body} o {error})\nconst r = $json\nconst chatId = $('Preparar evidencia').first().json.chatId\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { responder: false, chatId } }]\n}\n\nif (status !== 201 || !body.folio) {\n  return [{ json: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',\n  } }]\n}\n\nconst det = body.detalle || {}\nconst lineas = [`📎 Evidencia ${body.folio} guardada.`]\nif (det.transcription) lineas.push(`🎙️ Escuché: «${det.transcription}»`)\nif (det.vision_description) lineas.push(`🖼 Veo: ${det.vision_description}`)\nif (Array.isArray(det.entities) && det.entities.length) {\n  lineas.push('🏷 ' + det.entities.map((e) => e.name).join(', '))\n}\nif (!body.processed) lineas.push('⏳ La proceso más tarde (la IA no respondió).')\n\nlet texto = lineas.join('\\n')\nif (texto.length > 4000) texto = texto.slice(0, 3997) + '…'\n\nreturn [{ json: { responder: true, chatId, texto } }]"
+        "jsCode": "// Entrada: respuesta full de \"Persistir evidencia\" ({statusCode, body} o {error})\nconst r = $json\nconst chatId = $('Preparar turno').first().json.chatId\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { chatId, respuestaDirecta: { responder: false, chatId } } }]\n}\n\nif (status !== 201 || !body.folio) {\n  return [{ json: { chatId, respuestaDirecta: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Ahora mismo no pude guardar tu evidencia. No la perdiste: mandala de nuevo en unos minutos.',\n  } } }]\n}\n\nconst det = body.detalle || {}\nconst evidencia = {\n  id: body.id,\n  folio: body.folio,\n  processed: body.processed,\n  detalle: {\n    transcription: det.transcription ?? null,\n    vision_description: det.vision_description ?? null,\n    entities: det.entities || [],\n  },\n}\n\nreturn [{ json: { chatId, input: { clase: 'evidencia', evidencia } } }]"
       }
     },
     {
       "id": "pbos-07",
+      "name": "¿Turno directo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.respuestaDirecta ? \"si\" : \"no\" }}",
+              "rightValue": "no",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pbos-08",
+      "name": "Turno del agente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CORE_API_URL }}/api/agent/next-turn",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Telegram-Chat-Id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({input: $json.input}) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "pbos-09",
+      "name": "Armar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// Entrada: respuesta full del HTTP next-turn ({statusCode, body:{texto, botones, estado}} o {error}),\n// o pass-through de \"Armar turno evidencia\" ({respuestaDirecta:{...}}), o ayuda local de\n// \"Preparar turno\" ({camino:'ayuda', chatId, texto}).\nconst r = $json\n\nfunction chatIdDelTurno() {\n  return $('Preparar turno').first().json.chatId\n}\n\nfunction filasDeTeclado(botones) {\n  const filas = []\n  for (let i = 0; i < botones.length; i += 3) {\n    filas.push(botones.slice(i, i + 3).map((b) => ({ text: b.label, callback_data: b.id })))\n  }\n  return filas\n}\n\nfunction truncar(texto) {\n  if (typeof texto !== 'string') return texto\n  return texto.length > 4000 ? texto.slice(0, 3997) + '…' : texto\n}\n\n// pass-through: el nodo \"Armar turno evidencia\" ya resolvió la respuesta (403/error de persistencia)\nif (r.respuestaDirecta) {\n  return [{ json: { ...r.respuestaDirecta, texto: truncar(r.respuestaDirecta.texto) } }]\n}\n\n// ayuda local (/start) resuelta en \"Preparar turno\"\nif (r.camino === 'ayuda') {\n  return [{ json: { responder: true, chatId: r.chatId, texto: truncar(r.texto) } }]\n}\n\nconst chatId = r.chatId || chatIdDelTurno()\nconst status = r.statusCode\nconst body = r.body || {}\n\nif (status === 403) {\n  // silencio administrativo: remitente no autorizado\n  return [{ json: { responder: false, chatId } }]\n}\n\nif (r.error || status !== 200) {\n  return [{ json: {\n    responder: true,\n    chatId,\n    texto: '⚠️ Algo falló de mi lado. No pude procesar tu mensaje — probá de nuevo en unos minutos.',\n  } }]\n}\n\nconst salida = { responder: true, chatId, texto: truncar(body.texto) }\nif (Array.isArray(body.botones) && body.botones.length) {\n  salida.reply_markup = { inline_keyboard: filasDeTeclado(body.botones) }\n}\n\nreturn [{ json: salida }]"
+      }
+    },
+    {
+      "id": "pbos-10",
       "name": "¿Responder?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1160,
-        380
+        1620,
+        400
       ],
       "parameters": {
         "conditions": {
@@ -165,13 +307,13 @@
       }
     },
     {
-      "id": "pbos-08",
+      "id": "pbos-11",
       "name": "Enviar por Telegram",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1380,
-        300
+        1840,
+        400
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -179,7 +321,7 @@
         "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.texto }) }}",
+        "jsonBody": "={{ JSON.stringify(Object.assign({chat_id: $json.chatId, text: $json.texto}, $json.reply_markup ? {reply_markup: $json.reply_markup} : {})) }}",
         "options": {
           "timeout": 30000
         }
@@ -202,36 +344,43 @@
       "main": [
         [
           {
-            "node": "Preparar evidencia",
+            "node": "Preparar turno",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Preparar evidencia": {
+    "Preparar turno": {
       "main": [
         [
           {
-            "node": "¿Es comando?",
+            "node": "Switch camino",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "¿Es comando?": {
+    "Switch camino": {
       "main": [
         [
           {
-            "node": "Enviar por Telegram",
+            "node": "Persistir evidencia",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Persistir evidencia",
+            "node": "Turno del agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Armar respuesta",
             "type": "main",
             "index": 0
           }
@@ -239,6 +388,46 @@
       ]
     },
     "Persistir evidencia": {
+      "main": [
+        [
+          {
+            "node": "Armar turno evidencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar turno evidencia": {
+      "main": [
+        [
+          {
+            "node": "¿Turno directo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Turno directo?": {
+      "main": [
+        [
+          {
+            "node": "Turno del agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Armar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Turno del agente": {
       "main": [
         [
           {
