@@ -5,7 +5,7 @@ import { getSession, setSession, clearSession } from '../services/sessions.js'
 import {
   createIdea, setIdeaStatus, linkIdeaProfiles, createDraft, updateDraft,
   setDraftStatus, createChannelVersion, pendingFor, connectedChannels,
-  crearPerfilConWaStatus,
+  crearPerfilConWaStatus, conectarCanal,
 } from '../services/editorial.js'
 import { proponerIdea, redactarBoceto, refinarBoceto, adaptarVersion } from '../services/redactor.js'
 import { renderChannelImage, FORMAT_DIMENSIONS } from '../services/imagen.js'
@@ -33,6 +33,28 @@ const BOTONES_PROG = [
 // Alfabeto seguro para códigos de invitación: sin 0/O/1/I (se confunden al dictar/leer).
 const ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const ROLES_VALIDOS = ['owner', 'editor', 'approver']
+
+// /conectar: botones de canal y, por canal, la lista ordenada de campos que se piden
+// uno por uno (nunca todos juntos) + el texto que se muestra al pedir cada campo.
+const BOTONES_CANAL = [
+  { id: 'conectar_linkedin', label: '💼 LinkedIn' },
+  { id: 'conectar_instagram', label: '📸 Instagram' },
+]
+const NOMBRE_CANAL = { linkedin: 'LinkedIn', instagram: 'Instagram' }
+const CAMPOS_CANAL = {
+  linkedin: ['access_token', 'person_urn'],
+  instagram: ['access_token', 'ig_user_id'],
+}
+const CAMPO_PROMPT = {
+  linkedin: {
+    access_token: 'Pegame el access_token de LinkedIn (lo sacás de tu app en linkedin.com/developers)',
+    person_urn: 'Ahora pasame el person_urn de LinkedIn (tu identificador, algo como urn:li:person:XXXXXXX, en la sección "Sign In with LinkedIn" de tu app)',
+  },
+  instagram: {
+    access_token: 'Pegame el access_token de Instagram (lo sacás de tu app en developers.facebook.com)',
+    ig_user_id: 'Ahora pasame el ig_user_id de Instagram (el ID numérico de tu cuenta Business, lo ves en el Graph API Explorer)',
+  },
+}
 
 // Formato propuesto por canal cuando la idea tiene una foto de evidencia disponible.
 const FORMATO_CON_IMAGEN = { linkedin: 'imagen', instagram: 'feed', wa_status: 'historia' }
@@ -202,6 +224,9 @@ async function handleComando(db, user, chatId, input) {
   if (comando === '/invitar' || comando.startsWith('/invitar ')) {
     return handleInvitar(db, user, chatId, comando)
   }
+  if (comando === '/conectar') {
+    return handleConectar(db, user, chatId)
+  }
   return textoGuia(getSession(db, user.id, chatId))
 }
 
@@ -271,6 +296,75 @@ function handleInvitar(db, user, chatId, comando) {
   return { texto: '¿Para qué marca es la invitación?', botones, estado: 'eligiendo_perfil_invitacion' }
 }
 
+// arranca (o retoma tras elegir perfil) el estado 'conectando_canal': primer paso,
+// pedir qué canal conectar con botones.
+function iniciarConexionCanal(db, user, chatId, profile) {
+  setSession(db, user.id, chatId, 'conectando_canal', { profileId: profile.id, paso: 'canal', borrador: {} })
+  return { texto: `¿Qué canal conectamos para ${profile.name}?`, botones: BOTONES_CANAL, estado: 'conectando_canal' }
+}
+
+// /conectar: solo owner. Resuelve el perfil igual que /invitar (único → directo,
+// varios → botones perfil_<id>, ninguno → mensaje de bloqueo).
+function handleConectar(db, user, chatId) {
+  const perfiles = perfilesConPermiso(db, user.id, 'gestionar_canales')
+  if (perfiles.length === 0) {
+    return { texto: '🔒 No sos owner de ninguna marca.', botones: [], estado: 'inicio' }
+  }
+  if (perfiles.length === 1) {
+    return iniciarConexionCanal(db, user, chatId, perfiles[0])
+  }
+  setSession(db, user.id, chatId, 'eligiendo_perfil_conexion', {})
+  const botones = perfiles.map((p) => ({ id: `perfil_${p.id}`, label: `👤 ${p.name}` }))
+  return { texto: '¿Para qué marca conectamos un canal?', botones, estado: 'eligiendo_perfil_conexion' }
+}
+
+// segundo turno de /conectar cuando el owner tiene varios perfiles: el botón perfil_<id>
+// elegido arranca el estado conectando_canal para ese perfil.
+function handlePerfilConexion(db, user, chatId, session, boton) {
+  const pid = Number(boton.slice('perfil_'.length))
+  const perfiles = perfilesConPermiso(db, user.id, 'gestionar_canales')
+  const profile = perfiles.find((p) => p.id === pid)
+  if (!profile) return textoGuia(session)
+  return iniciarConexionCanal(db, user, chatId, profile)
+}
+
+// boton conectar_linkedin / conectar_instagram: fija el canal elegido y pide el
+// primer campo de credencial (nunca todos juntos).
+function handleCanalElegido(db, user, chatId, session, boton) {
+  const channel = boton === 'conectar_linkedin' ? 'linkedin' : 'instagram'
+  const profileId = session.data?.profileId
+  const campos = CAMPOS_CANAL[channel]
+  setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: 'campo_0', borrador: {} })
+  return { texto: CAMPO_PROMPT[channel][campos[0]], botones: [], estado: 'conectando_canal' }
+}
+
+// handleTexto en estado conectando_canal (una vez elegido el canal): guarda el campo
+// actual y avanza. Al completar todos los campos, conecta el canal y confirma
+// mostrando solo los últimos 4 caracteres del access_token — nunca el valor completo,
+// ni acá ni en las confirmaciones intermedias.
+function handleTextoConectar(db, user, chatId, session, input) {
+  const { profileId, channel, paso, borrador = {} } = session.data
+  const campos = CAMPOS_CANAL[channel]
+  const idx = Number(paso.slice('campo_'.length))
+  const campoActual = campos[idx]
+  const nuevoBorrador = { ...borrador, [campoActual]: input.texto.trim() }
+
+  if (idx + 1 < campos.length) {
+    const siguienteCampo = campos[idx + 1]
+    setSession(db, user.id, chatId, 'conectando_canal', { profileId, channel, paso: `campo_${idx + 1}`, borrador: nuevoBorrador })
+    return { texto: `✅ Guardado. ${CAMPO_PROMPT[channel][siguienteCampo]}`, botones: [], estado: 'conectando_canal' }
+  }
+
+  conectarCanal(db, { profileId, channelCode: channel, credentials: nuevoBorrador })
+  clearSession(db, user.id, chatId)
+  const ultimos4 = (nuevoBorrador.access_token || '').slice(-4)
+  return {
+    texto: `✅ ${NOMBRE_CANAL[channel]} conectado (token terminado en ...${ultimos4}). Ya se puede publicar ahí.`,
+    botones: [],
+    estado: 'inicio',
+  }
+}
+
 // ---------------------------------------------------------------------------
 // texto: feedback en refinando_boceto
 // ---------------------------------------------------------------------------
@@ -286,6 +380,9 @@ async function handleTexto(db, user, chatId, input, opts) {
     updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
     setSession(db, user.id, chatId, 'refinando_boceto', { ideaId, profileId, draftId, queue })
     return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
+  }
+  if (session.state === 'conectando_canal' && session.data?.channel) {
+    return handleTextoConectar(db, user, chatId, session, input)
   }
   if (session.state === 'inicio' || !session.state) return handleTextoCaptura(db, user, chatId, input, opts)
   return textoGuia(session)
@@ -334,7 +431,13 @@ async function handleBoton(db, user, chatId, input, opts) {
   if (boton.startsWith('perfil_') && session.state === 'eligiendo_perfil_invitacion') {
     return handlePerfilInvitacion(db, user, chatId, session, boton)
   }
+  if (boton.startsWith('perfil_') && session.state === 'eligiendo_perfil_conexion') {
+    return handlePerfilConexion(db, user, chatId, session, boton)
+  }
   if (boton.startsWith('perfil_')) return handlePerfilElegido(db, user, chatId, session, boton, opts)
+  if ((boton === 'conectar_linkedin' || boton === 'conectar_instagram') && session.state === 'conectando_canal') {
+    return handleCanalElegido(db, user, chatId, session, boton)
+  }
   if (boton === 'boceto_aprobar') return handleBocetoAprobar(db, user, chatId, session, opts)
   if (boton === 'boceto_otra') return handleBocetoOtra(db, user, chatId, session, opts)
   if (boton === 'boceto_descartar') return handleBocetoDescartar(db, user, chatId, session, opts)

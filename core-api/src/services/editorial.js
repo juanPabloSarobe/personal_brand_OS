@@ -1,3 +1,5 @@
+import { encryptJson } from '../crypto.js'
+
 export function createIdea(db, { userId, title, summary = null, evidenceIds = [] }) {
   const id = db.prepare(
     'INSERT INTO ideas (created_by, title, summary) VALUES (?, ?, ?)'
@@ -91,6 +93,26 @@ export function crearPerfilConWaStatus(db, { name, slug, identity = {}, ownerId 
     VALUES (?, ?, 'conectado', NULL)
   `).run(profileId, waChannel.id)
   return profileId
+}
+
+// Cifra y guarda (o actualiza) las credenciales de un canal para un perfil.
+// Mismo INSERT/UPSERT que antes vivía inline en routes/profiles.js POST /:id/channels
+// — helper compartido entre esa ruta REST y el comando conversacional /conectar,
+// para no tener dos caminos que hagan lo mismo distinto.
+export function conectarCanal(db, { profileId, channelCode, credentials = null, handle = null, tokenExpiresAt = null }) {
+  const channel = db.prepare('SELECT id FROM channels WHERE code = ?').get(channelCode)
+  if (!channel) throw new Error(`canal desconocido: ${channelCode}`)
+  const enc = credentials ? encryptJson(credentials) : null
+  const status = credentials ? 'conectado' : 'desconectado'
+  db.prepare(`
+    INSERT INTO profile_channels (profile_id, channel_id, handle, credentials_enc, status, token_expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (profile_id, channel_id) DO UPDATE SET
+      handle = excluded.handle,
+      credentials_enc = COALESCE(excluded.credentials_enc, credentials_enc),
+      status = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.status ELSE profile_channels.status END,
+      token_expires_at = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.token_expires_at ELSE profile_channels.token_expires_at END
+  `).run(profileId, channel.id, handle, enc, status, tokenExpiresAt)
 }
 
 export function connectedChannels(db, profileId) {
