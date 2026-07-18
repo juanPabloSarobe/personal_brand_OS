@@ -8,12 +8,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.11.1",
     "express": "^4.21.0",
     "sharp": "^0.33.5"
   },
   "devDependencies": {
     "supertest": "^7.0.0",
     "vitest": "^2.1.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.21.5": true,
+    "fsevents@2.3.3": true,
+    "sharp@0.33.5": true
   }
 }
