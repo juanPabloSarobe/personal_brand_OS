@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { can } from '../permissions.js'
-import { encryptJson } from '../crypto.js'
+import { crearPerfilConWaStatus, conectarCanal } from '../services/editorial.js'
 
 const EDITABLE = ['name', 'identity_json', 'cadence_json', 'format_strategy_json', 'ai_overrides_json', 'visual_template']
 
@@ -22,13 +22,18 @@ export function profilesRouter(db) {
     if (!req.user.is_admin) return res.status(403).json({ error: 'solo el administrador crea perfiles' })
     const { name, slug, identity = {} } = req.body
     if (!name || !slug) return res.status(400).json({ error: 'name y slug son requeridos' })
-    const info = db.prepare(
-      'INSERT INTO brand_profiles (name, slug, identity_json) VALUES (?, ?, ?)'
-    ).run(name, slug, JSON.stringify(identity))
-    db.prepare(
-      "INSERT INTO user_profile_access (user_id, profile_id, role) VALUES (?, ?, 'owner')"
-    ).run(req.user.id, info.lastInsertRowid)
-    res.status(201).json({ id: info.lastInsertRowid })
+    let profileId
+    try {
+      profileId = crearPerfilConWaStatus(db, { name, slug, identity, ownerId: req.user.id })
+    } catch (err) {
+      // slug repetido (UNIQUE en brand_profiles.slug): 409 claro en vez del 500 genérico
+      // "error interno" del middleware de errores de app.js.
+      if (err?.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE/i.test(err?.message || '')) {
+        return res.status(409).json({ error: 'ya existe una marca con ese slug' })
+      }
+      throw err
+    }
+    res.status(201).json({ id: profileId })
   })
 
   r.get('/:id', (req, res) => {
@@ -66,20 +71,11 @@ export function profilesRouter(db) {
       return res.status(403).json({ error: 'solo owner gestiona canales' })
     }
     const { channel_code, handle = null, credentials = null, token_expires_at = null } = req.body
-    const channel = db.prepare('SELECT id FROM channels WHERE code = ?').get(channel_code)
-    if (!channel) return res.status(400).json({ error: `canal desconocido: ${channel_code}` })
-
-    const enc = credentials ? encryptJson(credentials) : null
-    const status = credentials ? 'conectado' : 'desconectado'
-    db.prepare(`
-      INSERT INTO profile_channels (profile_id, channel_id, handle, credentials_enc, status, token_expires_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (profile_id, channel_id) DO UPDATE SET
-        handle = excluded.handle,
-        credentials_enc = COALESCE(excluded.credentials_enc, credentials_enc),
-        status = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.status ELSE profile_channels.status END,
-        token_expires_at = CASE WHEN excluded.credentials_enc IS NOT NULL THEN excluded.token_expires_at ELSE profile_channels.token_expires_at END
-    `).run(id, channel.id, handle, enc, status, token_expires_at)
+    try {
+      conectarCanal(db, { profileId: id, channelCode: channel_code, credentials, handle, tokenExpiresAt: token_expires_at })
+    } catch (err) {
+      return res.status(400).json({ error: err.message })
+    }
     res.status(201).json({ ok: true })
   })
 

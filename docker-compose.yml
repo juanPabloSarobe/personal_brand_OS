@@ -8,8 +8,38 @@ services:
     volumes:
       - pbos_data:/data
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    environment:
+      - CORE_API_URL=http://core-api:3000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_SECURE_COOKIE=false
+      - N8N_PAYLOAD_SIZE_MAX=48
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    depends_on:
+      - core-api
+
+  puente-telegram:
+    build: ./puente-telegram
+    init: true
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/telegram
+    restart: unless-stopped
+    depends_on:
+      - n8n
 
 volumes:
   pbos_data:
+    name: pbos_data # nombre fijo: scripts/backup.sh y restore.sh lo referencian literal,
+                     # sin depender del nombre de proyecto de compose.
+  n8n_data:

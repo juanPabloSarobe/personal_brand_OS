@@ -86,6 +86,23 @@ describe('perfiles de marca', () => {
     expect(putRes.body).toEqual({ error: 'error interno' })
   })
 
+  it('slug duplicado devuelve 409 claro, no 500 genérico', async () => {
+    const { app } = makeTestApp()
+    const primero = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'SkyTrace', slug: 'skytrace' })
+    expect(primero.status).toBe(201)
+
+    const segundo = await request(app).post('/api/profiles')
+      .set('X-Telegram-Chat-Id', ADMIN_CHAT)
+      .send({ name: 'SkyTrace otra vez', slug: 'skytrace' })
+    expect(segundo.status).toBe(409)
+    expect(segundo.body.error).toBeTruthy()
+
+    const list = await request(app).get('/api/profiles').set('X-Telegram-Chat-Id', ADMIN_CHAT)
+    expect(list.body).toHaveLength(1)
+  })
+
   it('JSON malformado devuelve 400, no 500', async () => {
     const { app } = makeTestApp()
     const res = await request(app).post('/api/profiles')
