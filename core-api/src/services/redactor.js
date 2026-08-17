@@ -43,9 +43,9 @@ export async function redactarBoceto(profile, idea, evidencias, { fetchImpl } = 
   return { content: content.trim(), raw }
 }
 
-export async function refinarBoceto(profile, contenidoActual, feedback, { fetchImpl } = {}) {
+export async function refinarBoceto(profile, contenidoActual, feedback, evidencias = [], { fetchImpl } = {}) {
   const { content, raw } = await chat('redactar', [
-    { role: 'system', content: `Sos el ghostwriter de ${profile.name}. Reescribí el post aplicando el pedido del usuario. Mantené el perfil de marca:\n${perfilTexto(profile)}\nDevolvé SOLO el texto del post.` },
+    { role: 'system', content: `Sos el ghostwriter de ${profile.name}. Reescribí el post aplicando el pedido del usuario. Mantené el perfil de marca:\n${perfilTexto(profile)}\n\nEVIDENCIA DISPONIBLE (única fuente de hechos):\n${evidenciaTexto(evidencias)}\n\nNo inventes cifras, métricas, porcentajes, fechas ni nombres que no estén en la evidencia. Si el post actual tiene datos que no figuran ahí, sacalos. Si el pedido necesita un dato que no tenés, omitilo antes que inventarlo.\nDevolvé SOLO el texto del post.` },
     { role: 'user', content: `POST ACTUAL:\n${contenidoActual}\n\nPEDIDO:\n${feedback}` },
   ], { fetchImpl })
   return { content: content.trim(), raw }

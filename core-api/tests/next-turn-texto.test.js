@@ -33,6 +33,21 @@ describe('texto en inicio = captura', () => {
     expect(ev.user_id).toBe(user.id)
   })
 
+  it('el refinado le pasa la evidencia original al LLM', async () => {
+    const { db, user } = setup()
+    await nextTurn(db, user, '111', { clase: 'texto', texto: 'termine de configurar el community manager' }, {
+      fetchImpl: llm([JSON.stringify({ entidades: [] }), '{"titulo": "T", "resumen": null}']),
+    })
+    await nextTurn(db, user, '111', { clase: 'boton', boton: 'idea_desarrollar' }, { fetchImpl: llm(['borrador con 153 interacciones']) })
+    let enviado = null
+    const captor = async (_u, opts) => {
+      enviado = opts.body
+      return { ok: true, json: async () => ({ choices: [{ message: { content: 'borrador corto' } }] }) }
+    }
+    await nextTurn(db, user, '111', { clase: 'texto', texto: 'no inventes datos' }, { fetchImpl: captor })
+    expect(enviado).toContain('termine de configurar el community manager')
+  })
+
   it('texto en refinando_boceto sigue siendo feedback (no crea evidencia)', async () => {
     const { db, user } = setup()
     await nextTurn(db, user, '111', { clase: 'texto', texto: 'evidencia base' }, {

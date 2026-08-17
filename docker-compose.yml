@@ -8,7 +8,7 @@ services:
     volumes:
       - pbos_data:/data
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3100:3000"
     restart: unless-stopped
 
   n8n:
@@ -18,10 +18,14 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       - N8N_DIAGNOSTICS_ENABLED=false
+      # n8n v20+ bloquea $env en los nodos por defecto (breaking change). El workflow
+      # lee CORE_API_URL, TELEGRAM_BOT_TOKEN e INTERNAL_API_SECRET vía $env, así que
+      # sin esto las llamadas salen con la URL vacía y el bot queda mudo.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_SECURE_COOKIE=false
       - N8N_PAYLOAD_SIZE_MAX=48
     ports:
-      - "127.0.0.1:5678:5678"
+      - "127.0.0.1:5679:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     restart: unless-stopped

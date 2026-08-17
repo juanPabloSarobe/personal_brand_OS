@@ -30,9 +30,15 @@ describe('redactor', () => {
 
   it('refinarBoceto pasa el feedback', async () => {
     const fetchImpl = llm('Versión más técnica…')
-    const res = await refinarBoceto(profile, 'texto viejo', 'menos épico, más técnico', { fetchImpl })
+    const res = await refinarBoceto(profile, 'texto viejo', 'menos épico, más técnico', [], { fetchImpl })
     expect(res.content).toBe('Versión más técnica…')
     expect(JSON.stringify(llm.lastBody.messages)).toContain('menos épico')
+  })
+
+  it('refinarBoceto incluye la evidencia para que no invente datos', async () => {
+    const fetchImpl = llm('Versión corregida…')
+    await refinarBoceto(profile, 'texto con 153 interacciones', 'no inventes datos', [{ texto: 'probamos el dron en Neuquén' }], { fetchImpl })
+    expect(JSON.stringify(llm.lastBody.messages)).toContain('probamos el dron en Neuquén')
   })
 
   it('adaptarVersion devuelve texto y hashtags', async () => {
