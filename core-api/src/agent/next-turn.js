@@ -428,7 +428,7 @@ async function handleTexto(db, user, chatId, input, opts) {
     const profile = db.prepare('SELECT * FROM brand_profiles WHERE id = ?').get(profileId)
     if (!can(db, user.id, profileId, 'editar_boceto')) return sinPermisoEditar(profile)
     const draft = db.prepare('SELECT * FROM drafts WHERE id = ?').get(draftId)
-    const { content, raw } = await refinarBoceto(profile, draft.content, input.texto, opts)
+    const { content, raw } = await refinarBoceto(profile, draft.content, input.texto, evidenciasDeIdea(db, ideaId), opts)
     updateDraft(db, draftId, { content, rawLlm: raw ? JSON.stringify(raw) : null })
     setSession(db, user.id, chatId, 'refinando_boceto', { ideaId, profileId, draftId, queue })
     return { texto: presentarBoceto(profile, content), botones: BOTONES_BOCETO, estado: 'refinando_boceto' }
