@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { chat, transcribe, describeImage, AiError } from '../src/ai/client.js'
+import { chat, transcribe, describeImage, AiError, timeoutMs } from '../src/ai/client.js'
 
 function okJson(payload) {
   return async () => ({ ok: true, json: async () => payload, text: async () => JSON.stringify(payload) })
@@ -9,6 +9,35 @@ describe('cliente de IA', () => {
   beforeEach(() => {
     process.env.GROQ_API_KEY = 'gsk-test'
     delete process.env.AI_ROUTES_JSON
+    delete process.env.OLLAMA_BASE_URL
+    delete process.env.AI_TIMEOUT_MS
+  })
+
+  it('el proveedor ollama no exige API key y usa su propia base', async () => {
+    delete process.env.GROQ_API_KEY
+    process.env.AI_ROUTES_JSON = JSON.stringify({ redactar: { provider: 'ollama', model: 'qwen2.5vl:7b' } })
+    let captured
+    const fetchImpl = async (url, opts) => { captured = { url, opts }; return { ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) } }
+    const res = await chat('redactar', [], { fetchImpl })
+    expect(res.content).toBe('ok')
+    expect(captured.url).toBe('http://host.docker.internal:11434/v1/chat/completions')
+    expect(captured.opts.headers.Authorization).toBeUndefined()
+  })
+
+  it('OLLAMA_BASE_URL pisa la base del proveedor local', async () => {
+    process.env.OLLAMA_BASE_URL = 'http://localhost:11434/v1'
+    process.env.AI_ROUTES_JSON = JSON.stringify({ vision: { provider: 'ollama', model: 'qwen2.5vl:7b' } })
+    let url
+    const fetchImpl = async (u) => { url = u; return { ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) } }
+    await chat('vision', [], { fetchImpl })
+    expect(url).toBe('http://localhost:11434/v1/chat/completions')
+  })
+
+  it('ollama tiene más timeout que groq y AI_TIMEOUT_MS lo pisa', () => {
+    expect(timeoutMs('ollama')).toBeGreaterThan(timeoutMs('groq'))
+    process.env.AI_TIMEOUT_MS = '5000'
+    expect(timeoutMs('ollama')).toBe(5000)
+    expect(timeoutMs('groq')).toBe(5000)
   })
 
   it('chat devuelve content y raw', async () => {
